@@ -62,7 +62,7 @@ func main() {
 			Title:       parsed.Title,
 			Initiative:  parsed.Initiative,
 			ProjectName: parsed.Project,
-			Type:        domain.TaskTypeChore,
+			Type:        parsed.TaskType,
 			Loop:        domain.LoopProduct,
 			EnergyType:  domain.EnergyProduces,
 			Nature:      domain.NatureMushin,
@@ -104,6 +104,30 @@ func main() {
 			fmt.Printf("- %s\n", issue)
 		}
 		os.Exit(1)
+	case "archive":
+		if err := st.Init(ctx); err != nil {
+			fatal(err)
+		}
+		query := strings.TrimSpace(strings.Join(args[1:], " "))
+		tasks, projects, err := taskSvc.ListArchivedFiltered(ctx, service.TaskFilter{Query: query})
+		if err != nil {
+			fatal(err)
+		}
+		if len(tasks) == 0 {
+			fmt.Println("no archived tasks")
+			return
+		}
+		for _, t := range tasks {
+			project := "-"
+			if p, ok := projects[t.ProjectID]; ok {
+				project = p.Name
+			}
+			archivedAt := "-"
+			if t.ArchivedAt != nil {
+				archivedAt = t.ArchivedAt.Format("2006-01-02 15:04")
+			}
+			fmt.Printf("%s  [%s]  %s  (%s)  archived:%s\n", t.Title, t.Type, project, t.ID, archivedAt)
+		}
 	default:
 		fatal(fmt.Errorf("unknown command: %s", args[0]))
 	}

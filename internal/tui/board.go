@@ -9,7 +9,8 @@ import (
 )
 
 func (m Model) viewBoard() string {
-	header := m.styles.header.Render("MITORI v1.0  Observability board")
+	header := m.styles.header.Render("MITORI v2.0  Observability board")
+	filterLine := m.styles.hint.Render("filters: " + m.filterLabel)
 
 	columns := make([]string, 0, len(domain.LaneOrder))
 	for i, lane := range domain.LaneOrder {
@@ -44,7 +45,7 @@ func (m Model) viewBoard() string {
 	}
 
 	status := m.styles.status.Render(m.status)
-	hint := m.styles.hint.Render("h/l lanes  j/k tasks  enter detail  a add  g project  ? help  q quit")
+	hint := m.styles.hint.Render("h/l lanes  j/k tasks  J/K reorder  / filters  A archive  a add  g project  ? help  q quit")
 	board := lipgloss.JoinHorizontal(lipgloss.Top, columns...)
-	return m.styles.app.Render(lipgloss.JoinVertical(lipgloss.Left, header, "", board, "", status, hint))
+	return m.styles.app.Render(lipgloss.JoinVertical(lipgloss.Left, header, filterLine, "", board, "", status, hint))
 }
