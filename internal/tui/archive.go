@@ -14,7 +14,7 @@ func (m Model) viewArchive() string {
 	if len(m.archiveTasks) == 0 {
 		lines = append(lines, m.styles.hint.Render("No archived tasks match the current filters."))
 	} else {
-		for _, t := range m.archiveTasks {
+		for idx, t := range m.archiveTasks {
 			project := "-"
 			if p, ok := m.projects[t.ProjectID]; ok {
 				project = p.Name
@@ -23,11 +23,20 @@ func (m Model) viewArchive() string {
 			if t.ArchivedAt != nil {
 				archivedAt = t.ArchivedAt.Format("2006-01-02 15:04")
 			}
-			lines = append(lines, fmt.Sprintf("- %s | %s | %s | %s | archived %s", t.Title, project, t.Initiative, t.Type, archivedAt))
+			line := fmt.Sprintf("%s | %s | %s | %s | archived %s", t.Title, project, t.Initiative, t.Type, archivedAt)
+			if idx == m.archiveIdx {
+				lines = append(lines, m.styles.cardActive.Render(line))
+			} else {
+				lines = append(lines, "- "+line)
+			}
+		}
+		if task, ok := m.currentArchiveTask(); ok {
+			lines = append(lines, "", m.styles.hint.Render(m.actionHintForActions(m.taskActions(task))))
 		}
 	}
 
-	lines = append(lines, "", m.styles.hint.Render("Esc back  / search/filter  c clear filters"))
+	lines = append(lines, "", m.styles.status.Render(m.status))
+	lines = append(lines, m.styles.hint.Render("j/k select  y confirm  Esc back/cancel  / search/filter  c clear filters"))
 	return m.styles.app.Render(strings.Join(lines, "\n"))
 }
 

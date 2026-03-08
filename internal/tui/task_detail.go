@@ -11,7 +11,7 @@ import (
 func (m Model) viewTaskDetail() string {
 	task, ok := m.currentTask()
 	if !ok {
-		return m.styles.app.Render("No task selected.\n\nPress q to go back.")
+		return m.styles.app.Render("No task selected.\n\nPress Esc to go back.")
 	}
 
 	projectName := "-"
@@ -47,7 +47,7 @@ func (m Model) viewTaskDetail() string {
 		m.styles.sectionTitle.Render("recent events"),
 		strings.Join(events, "\n"),
 		"",
-		m.styles.hint.Render("Esc back  p park/unpark  t touch  d done  b backlog  x archive"),
+		m.styles.hint.Render(m.actionHint() + "  t:touch  y:confirm  Esc:back  q:quit"),
 	}
 	return m.styles.app.Render(strings.Join(lines, "\n"))
 }

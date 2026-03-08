@@ -45,7 +45,6 @@ func (s *TaskService) Create(ctx context.Context, in CreateTaskInput) (domain.Ta
 	if !domain.ValidInitiative(initiative) {
 		initiative = domain.InitiativeWNT
 	}
-
 	project, err := s.projectSvc.Ensure(ctx, initiative, in.ProjectName)
 	if err != nil {
 		return domain.Task{}, err
@@ -63,7 +62,7 @@ func (s *TaskService) Create(ctx context.Context, in CreateTaskInput) (domain.Ta
 	if !domain.ValidNature(in.Nature) {
 		in.Nature = domain.NatureMushin
 	}
-	if !domain.ValidLane(in.Lane) {
+	if !domain.ValidLane(in.Lane) || in.Lane == domain.LaneArchived {
 		in.Lane = domain.LaneBacklog
 	}
 
@@ -71,6 +70,7 @@ func (s *TaskService) Create(ctx context.Context, in CreateTaskInput) (domain.Ta
 	if err != nil {
 		return domain.Task{}, err
 	}
+	normalizeLegacyArchive(&snap)
 
 	now := time.Now().UTC()
 	task := domain.Task{
@@ -90,7 +90,7 @@ func (s *TaskService) Create(ctx context.Context, in CreateTaskInput) (domain.Ta
 	}
 
 	snap.Tasks = append(snap.Tasks, task)
-	snap.Events = append(snap.Events, domain.Event{
+	appendEvent(&snap, domain.Event{
 		ID:        newID("evt"),
 		TaskID:    task.ID,
 		Type:      domain.EventTaskCreated,
@@ -107,9 +107,11 @@ func (s *TaskService) ListActive(ctx context.Context) ([]domain.Task, error) {
 	if err != nil {
 		return nil, err
 	}
+	normalizeLegacyArchive(&snap)
+
 	out := make([]domain.Task, 0, len(snap.Tasks))
 	for _, t := range snap.Tasks {
-		if t.ArchivedAt == nil {
+		if t.Lane != domain.LaneArchived && t.ArchivedAt == nil {
 			out = append(out, t)
 		}
 	}
@@ -122,10 +124,12 @@ func (s *TaskService) ListArchivedFiltered(ctx context.Context, filter TaskFilte
 	if err != nil {
 		return nil, nil, err
 	}
+	normalizeLegacyArchive(&snap)
+
 	projects := mapProjects(snap.Projects)
 	out := make([]domain.Task, 0)
 	for _, t := range snap.Tasks {
-		if t.ArchivedAt == nil {
+		if t.Lane != domain.LaneArchived && t.ArchivedAt == nil {
 			continue
 		}
 		projectName := ""
@@ -173,6 +177,7 @@ func (s *TaskService) Get(ctx context.Context, taskID string) (domain.Task, bool
 	if err != nil {
 		return domain.Task{}, false, err
 	}
+	normalizeLegacyArchive(&snap)
 	for _, t := range snap.Tasks {
 		if t.ID == taskID {
 			return t, true, nil
@@ -181,90 +186,93 @@ func (s *TaskService) Get(ctx context.Context, taskID string) (domain.Task, bool
 	return domain.Task{}, false, nil
 }
 
-func (s *TaskService) MoveLane(ctx context.Context, taskID string, lane domain.Lane) error {
-	if !domain.ValidLane(lane) {
-		return fmt.Errorf("invalid lane: %s", lane)
-	}
+func (s *TaskService) AllowedActionsForTask(task domain.Task) []domain.TaskAction {
+	return domain.AllowedTaskActions(task.Lane)
+}
 
+func (s *TaskService) Transition(ctx context.Context, taskID string, to domain.Lane, confirmed bool) error {
 	snap, err := s.store.Load(ctx)
 	if err != nil {
 		return err
 	}
+	normalizeLegacyArchive(&snap)
 
-	now := time.Now().UTC()
 	task, ok := findTask(snap.Tasks, taskID)
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	if task.ArchivedAt != nil {
-		return fmt.Errorf("task is archived: %s", taskID)
-	}
-	if task.Lane == lane {
+	from := task.Lane
+	if from == to {
 		return nil
 	}
 
+	tr, allowed := domain.CanTransition(from, to)
+	if !allowed {
+		return fmt.Errorf("transition not allowed from %s to %s", from, to)
+	}
+	if tr.RequiresConfirmation && !confirmed {
+		return fmt.Errorf("confirmation required for transition %s -> %s", from, to)
+	}
+
+	now := time.Now().UTC()
 	oldLane := task.Lane
-	newPos := nextLanePosition(snap, lane)
-	task.Lane = lane
-	task.Position = newPos
+	if to == domain.LaneArchived {
+		task.Lane = domain.LaneArchived
+		task.ArchivedAt = &now
+		task.Position = 0
+		normalizeLanePositions(snap, oldLane)
+	} else {
+		task.Lane = to
+		task.Position = nextLanePosition(snap, to)
+		if oldLane == domain.LaneArchived {
+			task.ArchivedAt = nil
+		}
+		normalizeLanePositions(snap, oldLane)
+		normalizeLanePositions(snap, to)
+	}
 	task.UpdatedAt = now
-	normalizeLanePositions(snap, oldLane)
-	normalizeLanePositions(snap, lane)
+
 	appendEvent(&snap, domain.Event{
 		ID:        newID("evt"),
 		TaskID:    task.ID,
 		Type:      domain.EventLaneChanged,
 		Timestamp: now,
 		Payload: map[string]interface{}{
-			"from": oldLane,
-			"to":   lane,
+			"from":      from,
+			"to":        to,
+			"class":     tr.Class,
+			"confirmed": confirmed,
 		},
 	})
+	if to == domain.LaneArchived {
+		appendEvent(&snap, domain.Event{
+			ID:        newID("evt"),
+			TaskID:    task.ID,
+			Type:      domain.EventTaskArchived,
+			Timestamp: now,
+			Payload: map[string]interface{}{
+				"from_lane": from,
+			},
+		})
+	}
+
 	return s.store.Save(ctx, snap)
 }
 
-func (s *TaskService) ToggleParking(ctx context.Context, taskID string) error {
-	snap, err := s.store.Load(ctx)
-	if err != nil {
-		return err
-	}
+func (s *TaskService) MoveLane(ctx context.Context, taskID string, lane domain.Lane) error {
+	return s.Transition(ctx, taskID, lane, false)
+}
 
-	now := time.Now().UTC()
-	task, ok := findTask(snap.Tasks, taskID)
-	if !ok {
-		return fmt.Errorf("task not found: %s", taskID)
-	}
-	if task.ArchivedAt != nil {
-		return fmt.Errorf("task is archived: %s", taskID)
-	}
+func (s *TaskService) MarkDone(ctx context.Context, taskID string) error {
+	return s.Transition(ctx, taskID, domain.LaneDone, false)
+}
 
-	oldLane := task.Lane
-	eventType := domain.EventTaskParked
-	payload := map[string]interface{}{"from": oldLane}
+func (s *TaskService) SendBacklog(ctx context.Context, taskID string) error {
+	return s.Transition(ctx, taskID, domain.LaneBacklog, false)
+}
 
-	if oldLane == domain.LaneParking {
-		newPos := nextLanePosition(snap, domain.LaneTodo)
-		task.Lane = domain.LaneTodo
-		task.Position = newPos
-		eventType = domain.EventTaskUnparked
-		payload = map[string]interface{}{"to": domain.LaneTodo}
-	} else {
-		newPos := nextLanePosition(snap, domain.LaneParking)
-		task.Lane = domain.LaneParking
-		task.Position = newPos
-	}
-	task.UpdatedAt = now
-
-	normalizeLanePositions(snap, oldLane)
-	normalizeLanePositions(snap, task.Lane)
-	appendEvent(&snap, domain.Event{
-		ID:        newID("evt"),
-		TaskID:    task.ID,
-		Type:      eventType,
-		Timestamp: now,
-		Payload:   payload,
-	})
-	return s.store.Save(ctx, snap)
+func (s *TaskService) Archive(ctx context.Context, taskID string) error {
+	return s.Transition(ctx, taskID, domain.LaneArchived, false)
 }
 
 func (s *TaskService) Touch(ctx context.Context, taskID string) error {
@@ -272,17 +280,17 @@ func (s *TaskService) Touch(ctx context.Context, taskID string) error {
 	if err != nil {
 		return err
 	}
+	normalizeLegacyArchive(&snap)
 
 	now := time.Now().UTC()
 	task, ok := findTask(snap.Tasks, taskID)
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	if task.ArchivedAt != nil {
-		return fmt.Errorf("task is archived: %s", taskID)
+	if task.Lane == domain.LaneArchived {
+		return fmt.Errorf("touch not allowed in archived lane")
 	}
 
-	// Bump touched task to the top of its current lane for better recency visibility.
 	task.Position = minLanePosition(snap, task.Lane) - 1
 	task.LastTouchedAt = &now
 	task.UpdatedAt = now
@@ -300,48 +308,6 @@ func (s *TaskService) Touch(ctx context.Context, taskID string) error {
 	return s.store.Save(ctx, snap)
 }
 
-func (s *TaskService) MarkDone(ctx context.Context, taskID string) error {
-	return s.MoveLane(ctx, taskID, domain.LaneDone)
-}
-
-func (s *TaskService) SendBacklog(ctx context.Context, taskID string) error {
-	return s.MoveLane(ctx, taskID, domain.LaneBacklog)
-}
-
-func (s *TaskService) Archive(ctx context.Context, taskID string) error {
-	snap, err := s.store.Load(ctx)
-	if err != nil {
-		return err
-	}
-
-	now := time.Now().UTC()
-	task, ok := findTask(snap.Tasks, taskID)
-	if !ok {
-		return fmt.Errorf("task not found: %s", taskID)
-	}
-	if task.ArchivedAt != nil {
-		return nil
-	}
-	if task.Lane != domain.LaneDone {
-		return fmt.Errorf("archive is allowed only when task is in done")
-	}
-
-	fromLane := task.Lane
-	task.ArchivedAt = &now
-	task.UpdatedAt = now
-	normalizeLanePositions(snap, fromLane)
-	appendEvent(&snap, domain.Event{
-		ID:        newID("evt"),
-		TaskID:    task.ID,
-		Type:      domain.EventTaskArchived,
-		Timestamp: now,
-		Payload: map[string]interface{}{
-			"from_lane": fromLane,
-		},
-	})
-	return s.store.Save(ctx, snap)
-}
-
 func (s *TaskService) EditTitle(ctx context.Context, taskID string, title string) error {
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -352,17 +318,17 @@ func (s *TaskService) EditTitle(ctx context.Context, taskID string, title string
 	if err != nil {
 		return err
 	}
+	normalizeLegacyArchive(&snap)
+
 	now := time.Now().UTC()
 	task, ok := findTask(snap.Tasks, taskID)
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	if task.ArchivedAt != nil {
-		return fmt.Errorf("task is archived: %s", taskID)
+	if !canEdit(task.Lane) {
+		return fmt.Errorf("edit only allowed in backlog")
 	}
-	if task.Lane != domain.LaneBacklog {
-		return fmt.Errorf("edit is allowed only when task is in backlog")
-	}
+
 	task.Title = title
 	task.UpdatedAt = now
 	appendEvent(&snap, domain.Event{
@@ -377,27 +343,28 @@ func (s *TaskService) EditTitle(ctx context.Context, taskID string, title string
 	return s.store.Save(ctx, snap)
 }
 
-func (s *TaskService) Delete(ctx context.Context, taskID string) error {
+func (s *TaskService) Delete(ctx context.Context, taskID string, confirmed bool) error {
 	snap, err := s.store.Load(ctx)
 	if err != nil {
 		return err
 	}
+	normalizeLegacyArchive(&snap)
 
 	taskIdx := -1
 	for i, t := range snap.Tasks {
 		if t.ID == taskID {
 			taskIdx = i
-			if t.ArchivedAt != nil {
-				return fmt.Errorf("task is archived: %s", taskID)
-			}
-			if t.Lane != domain.LaneBacklog {
-				return fmt.Errorf("delete is allowed only when task is in backlog")
+			if !canDelete(t.Lane) {
+				return fmt.Errorf("delete only allowed in backlog")
 			}
 			break
 		}
 	}
 	if taskIdx == -1 {
 		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if !confirmed {
+		return fmt.Errorf("confirmation required for delete")
 	}
 
 	lane := snap.Tasks[taskIdx].Lane
@@ -417,18 +384,20 @@ func (s *TaskService) ReorderInLane(ctx context.Context, taskID string, directio
 	if direction != -1 && direction != 1 {
 		return fmt.Errorf("direction must be -1 or 1")
 	}
+
 	snap, err := s.store.Load(ctx)
 	if err != nil {
 		return err
 	}
+	normalizeLegacyArchive(&snap)
 
 	now := time.Now().UTC()
 	task, ok := findTask(snap.Tasks, taskID)
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	if task.ArchivedAt != nil {
-		return fmt.Errorf("task is archived: %s", taskID)
+	if task.Lane == domain.LaneArchived {
+		return fmt.Errorf("cannot reorder archived task")
 	}
 
 	type laneRef struct {
@@ -437,7 +406,7 @@ func (s *TaskService) ReorderInLane(ctx context.Context, taskID string, directio
 	}
 	refs := make([]laneRef, 0)
 	for i, t := range snap.Tasks {
-		if t.ArchivedAt != nil || t.Lane != task.Lane {
+		if t.Lane != task.Lane {
 			continue
 		}
 		refs = append(refs, laneRef{idx: i, pos: t.Position})
@@ -458,7 +427,6 @@ func (s *TaskService) ReorderInLane(ctx context.Context, taskID string, directio
 	if target < 0 || target >= len(refs) {
 		return nil
 	}
-
 	a := refs[current].idx
 	b := refs[target].idx
 	snap.Tasks[a].Position, snap.Tasks[b].Position = snap.Tasks[b].Position, snap.Tasks[a].Position
@@ -504,6 +472,33 @@ func (s *TaskService) RecentEvents(ctx context.Context, taskID string, limit int
 	return out, nil
 }
 
+func canEdit(lane domain.Lane) bool {
+	for _, action := range domain.AllowedTaskActions(lane) {
+		if action.Kind == domain.ActionEdit {
+			return true
+		}
+	}
+	return false
+}
+
+func canDelete(lane domain.Lane) bool {
+	for _, action := range domain.AllowedTaskActions(lane) {
+		if action.Kind == domain.ActionDelete {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeLegacyArchive(snap *store.Snapshot) {
+	for i := range snap.Tasks {
+		if snap.Tasks[i].ArchivedAt != nil && snap.Tasks[i].Lane != domain.LaneArchived {
+			snap.Tasks[i].Lane = domain.LaneArchived
+			snap.Tasks[i].Position = 0
+		}
+	}
+}
+
 func appendEvent(snap *store.Snapshot, evt domain.Event) {
 	snap.Events = append(snap.Events, evt)
 }
@@ -520,7 +515,7 @@ func findTask(tasks []domain.Task, taskID string) (*domain.Task, bool) {
 func nextLanePosition(snap store.Snapshot, lane domain.Lane) int {
 	maxPos := 0
 	for _, t := range snap.Tasks {
-		if t.ArchivedAt == nil && t.Lane == lane && t.Position > maxPos {
+		if t.Lane == lane && t.Position > maxPos {
 			maxPos = t.Position
 		}
 	}
@@ -531,7 +526,7 @@ func minLanePosition(snap store.Snapshot, lane domain.Lane) int {
 	minPos := 1
 	found := false
 	for _, t := range snap.Tasks {
-		if t.ArchivedAt == nil && t.Lane == lane {
+		if t.Lane == lane {
 			if !found || t.Position < minPos {
 				minPos = t.Position
 				found = true
@@ -545,9 +540,12 @@ func minLanePosition(snap store.Snapshot, lane domain.Lane) int {
 }
 
 func normalizeLanePositions(snap store.Snapshot, lane domain.Lane) {
+	if lane == domain.LaneArchived {
+		return
+	}
 	indexes := make([]int, 0)
 	for i, t := range snap.Tasks {
-		if t.ArchivedAt == nil && t.Lane == lane {
+		if t.Lane == lane {
 			indexes = append(indexes, i)
 		}
 	}
@@ -588,5 +586,8 @@ func laneIndex(lane domain.Lane) int {
 			return i
 		}
 	}
-	return len(domain.LaneOrder)
+	if lane == domain.LaneArchived {
+		return len(domain.LaneOrder)
+	}
+	return len(domain.LaneOrder) + 1
 }
