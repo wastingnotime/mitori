@@ -2,7 +2,7 @@
 
 Mitori is a local-first terminal Kanban for personal work observability.
 
-## v2.0 scope
+## v0.2 scope
 
 - single-user
 - local JSON storage
@@ -31,10 +31,13 @@ go run ./cmd/mitori
 go run ./cmd/mitori                 # launch TUI board
 go run ./cmd/mitori init            # initialize data file
 go run ./cmd/mitori add "cz - collision playground -> allow fullscreen mode"
+go run ./cmd/mitori add "cz - collision playground - allow fullscreen mode"
 go run ./cmd/mitori projects
 go run ./cmd/mitori doctor
 go run ./cmd/mitori archive
 go run ./cmd/mitori archive crash
+go run ./cmd/mitori import          # placeholder, not implemented yet
+go run ./cmd/mitori export          # placeholder, not implemented yet
 ```
 
 Default data path:
@@ -49,11 +52,15 @@ You can override the data file path with:
 
 Input pattern:
 
+`initiative - project - title`
+
+Compatible pattern:
+
 `initiative - project -> title`
 
 Example:
 
-`cz - collision playground -> allow fullscreen mode`
+`cz - collision playground - allow fullscreen mode`
 
 Parsed fields:
 
@@ -73,10 +80,16 @@ Deterministic type inference is applied from title text:
 
 - Board filters with `/`:
   - free-text search over title, description, project
-  - tokens: `project:"name" initiative:cz energy:produces type:feat`
+  - token forms: `project turtle`, `/project turtle`, `project:"name"`, `initiative cz`, `energy produces`, `type discovery`
 - Archive browser with `A` (respects active filters)
 - Manual reorder within lane with `K` (up) and `J` (down)
 - Project view (`g`) now includes:
   - counts by lane
   - recent project activity
 - Task detail includes payload-aware event history
+- Lifecycle rules:
+  - edit/delete only in `backlog`
+  - archive only in `done`
+- Navigation:
+  - `q` quits app
+  - `Esc` backs out of screen/input

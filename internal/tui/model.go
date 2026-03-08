@@ -38,8 +38,10 @@ type Model struct {
 	archiveTasks []domain.Task
 	overview     service.ProjectOverview
 
-	quickInput  textinput.Model
-	searchInput textinput.Model
+	quickInput    textinput.Model
+	searchInput   textinput.Model
+	editInput     textinput.Model
+	editingTaskID string
 }
 
 func NewModel(ctx context.Context, taskSvc *service.TaskService, projectSvc *service.ProjectService, boardSvc *service.BoardService) (Model, error) {
@@ -54,6 +56,11 @@ func NewModel(ctx context.Context, taskSvc *service.TaskService, projectSvc *ser
 	searchInput.CharLimit = 220
 	searchInput.Width = 72
 
+	editInput := textinput.New()
+	editInput.Placeholder = "new task title"
+	editInput.CharLimit = 220
+	editInput.Width = 72
+
 	m := Model{
 		ctx:           ctx,
 		taskSvc:       taskSvc,
@@ -65,6 +72,7 @@ func NewModel(ctx context.Context, taskSvc *service.TaskService, projectSvc *ser
 		laneSelection: make(map[domain.Lane]int, len(domain.LaneOrder)),
 		quickInput:    addInput,
 		searchInput:   searchInput,
+		editInput:     editInput,
 	}
 	for _, lane := range domain.LaneOrder {
 		m.laneSelection[lane] = 0
@@ -84,13 +92,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case tea.KeyMsg:
+		if msg.String() == "q" && m.screen != screenQuickAdd && m.screen != screenSearch && m.screen != screenEdit {
+			return m, tea.Quit
+		}
 		switch m.screen {
 		case screenQuickAdd:
 			return m.updateQuickAdd(msg)
+		case screenEdit:
+			return m.updateEdit(msg)
 		case screenTaskDetail:
 			return m.updateTaskDetail(msg)
 		case screenProjectView, screenHelp:
-			if msg.String() == "q" || msg.String() == "esc" {
+			if msg.String() == "esc" {
 				m.screen = screenBoard
 			}
 			return m, nil
@@ -119,6 +132,8 @@ func (m Model) View() string {
 		return m.viewSearch()
 	case screenArchive:
 		return m.viewArchive()
+	case screenEdit:
+		return m.viewEdit()
 	default:
 		return m.viewBoard()
 	}
@@ -126,7 +141,7 @@ func (m Model) View() string {
 
 func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c":
 		return m, tea.Quit
 	case KeyLeft:
 		m.laneIdx = max(0, m.laneIdx-1)
@@ -197,6 +212,8 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.applyTaskAction("backlog", func(id string) error { return m.taskSvc.SendBacklog(m.ctx, id) })
 	case "x":
 		return m.applyTaskAction("archive", func(id string) error { return m.taskSvc.Archive(m.ctx, id) })
+	case "X":
+		return m.applyTaskAction("delete", func(id string) error { return m.taskSvc.Delete(m.ctx, id) })
 	case "m":
 		task, ok := m.currentTask()
 		if !ok {
@@ -218,14 +235,22 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "J":
 		return m.reorderCurrentTask(1)
 	case "e":
-		m.status = "Not implemented in v2"
+		task, ok := m.currentTask()
+		if !ok {
+			m.status = "No task selected"
+			return m, nil
+		}
+		m.editingTaskID = task.ID
+		m.editInput.SetValue(task.Title)
+		m.editInput.Focus()
+		m.screen = screenEdit
 	}
 	return m, nil
 }
 
 func (m Model) updateTaskDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "q", "esc":
+	case "esc":
 		m.screen = screenBoard
 	case "p":
 		return m.applyTaskAction("park/unpark", func(id string) error { return m.taskSvc.ToggleParking(m.ctx, id) })
@@ -278,6 +303,36 @@ func (m Model) updateQuickAdd(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.screen = screenBoard
+		m.editingTaskID = ""
+		return m, nil
+	case "enter":
+		if m.editingTaskID == "" {
+			m.status = "No task selected for edit"
+			m.screen = screenBoard
+			return m, nil
+		}
+		if err := m.taskSvc.EditTitle(m.ctx, m.editingTaskID, m.editInput.Value()); err != nil {
+			m.status = fmt.Sprintf("edit failed: %v", err)
+			return m, nil
+		}
+		m.screen = screenBoard
+		m.editingTaskID = ""
+		if err := m.reload(); err != nil {
+			m.status = fmt.Sprintf("reload failed: %v", err)
+			return m, nil
+		}
+		m.status = "Task edited"
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.editInput, cmd = m.editInput.Update(msg)
+	return m, cmd
+}
+
 func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -293,9 +348,6 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = "Filters updated"
 		m.screen = screenBoard
 		return m, nil
-	case "c":
-		m.searchInput.SetValue("")
-		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -305,7 +357,7 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateArchive(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "q", "esc":
+	case "esc":
 		m.screen = screenBoard
 	case "/":
 		m.searchInput.SetValue(filterToInput(m.filter, m.projects))
@@ -440,25 +492,21 @@ func parseFilterInput(raw string, projects map[string]domain.Project) service.Ta
 	parts := splitFilterArgs(strings.TrimSpace(raw))
 	filter := service.TaskFilter{}
 	textParts := make([]string, 0)
-	for _, part := range parts {
-		switch {
-		case strings.HasPrefix(part, "project:"):
-			name := strings.TrimSpace(strings.TrimPrefix(part, "project:"))
-			filter.ProjectID = findProjectIDByName(name, projects)
-		case strings.HasPrefix(part, "initiative:"):
-			v := domain.Initiative(strings.TrimSpace(strings.TrimPrefix(part, "initiative:")))
-			if domain.ValidInitiative(v) {
-				filter.Initiative = v
-			}
-		case strings.HasPrefix(part, "energy:"):
-			v := domain.EnergyType(strings.TrimSpace(strings.TrimPrefix(part, "energy:")))
-			if domain.ValidEnergyType(v) {
-				filter.EnergyType = v
-			}
-		case strings.HasPrefix(part, "type:"):
-			v := domain.TaskType(strings.TrimSpace(strings.TrimPrefix(part, "type:")))
-			if domain.ValidTaskType(v) {
-				filter.TaskType = v
+	for i := 0; i < len(parts); i++ {
+		part := parts[i]
+		key := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(part)), "/")
+
+		if strings.Contains(key, ":") {
+			kv := strings.SplitN(key, ":", 2)
+			applyFilterKeyValue(&filter, kv[0], kv[1], projects)
+			continue
+		}
+
+		switch key {
+		case "project", "initiative", "energy", "type":
+			if i+1 < len(parts) {
+				applyFilterKeyValue(&filter, key, parts[i+1], projects)
+				i++
 			}
 		default:
 			textParts = append(textParts, part)
@@ -466,6 +514,29 @@ func parseFilterInput(raw string, projects map[string]domain.Project) service.Ta
 	}
 	filter.Query = strings.TrimSpace(strings.Join(textParts, " "))
 	return filter
+}
+
+func applyFilterKeyValue(filter *service.TaskFilter, key string, value string, projects map[string]domain.Project) {
+	v := strings.TrimSpace(value)
+	switch key {
+	case "project":
+		filter.ProjectID = findProjectIDByName(v, projects)
+	case "initiative":
+		initiative := domain.Initiative(strings.ToLower(v))
+		if domain.ValidInitiative(initiative) {
+			filter.Initiative = initiative
+		}
+	case "energy":
+		energy := domain.EnergyType(strings.ToLower(v))
+		if domain.ValidEnergyType(energy) {
+			filter.EnergyType = energy
+		}
+	case "type":
+		taskType := domain.TaskType(strings.ToLower(v))
+		if domain.ValidTaskType(taskType) {
+			filter.TaskType = taskType
+		}
+	}
 }
 
 func splitFilterArgs(raw string) []string {

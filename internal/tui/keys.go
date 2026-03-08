@@ -17,4 +17,5 @@ const (
 	screenHelp
 	screenSearch
 	screenArchive
+	screenEdit
 )

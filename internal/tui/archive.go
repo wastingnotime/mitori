@@ -27,7 +27,7 @@ func (m Model) viewArchive() string {
 		}
 	}
 
-	lines = append(lines, "", m.styles.hint.Render("q back  / search/filter  c clear filters"))
+	lines = append(lines, "", m.styles.hint.Render("Esc back  / search/filter  c clear filters"))
 	return m.styles.app.Render(strings.Join(lines, "\n"))
 }
 
@@ -36,12 +36,13 @@ func (m Model) viewSearch() string {
 		m.styles.header.Render("FILTERS"),
 		"",
 		"Type plain text to search over title, description, and project name.",
-		"Optional deterministic tokens:",
-		`project:"<name>"  initiative:<wnt|cz|dm>  energy:<produces|consumes>  type:<discovery|feat|refact|chore|fix>`,
+		"Token formats supported:",
+		`project turtle   initiative cz   energy produces   type discovery`,
+		`project:"collision playground"   initiative:cz   energy:produces   type:feat`,
 		"",
 		m.searchInput.View(),
 		"",
-		m.styles.hint.Render("enter apply  esc cancel  c clear"),
+		m.styles.hint.Render("enter apply  esc cancel"),
 	}
 	return m.styles.app.Render(strings.Join(lines, "\n"))
 }

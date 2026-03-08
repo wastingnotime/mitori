@@ -128,6 +128,10 @@ func main() {
 			}
 			fmt.Printf("%s  [%s]  %s  (%s)  archived:%s\n", t.Title, t.Type, project, t.ID, archivedAt)
 		}
+	case "import":
+		fmt.Println("import: intended to load tasks/projects/events from external data. not implemented yet.")
+	case "export":
+		fmt.Println("export: intended to write tasks/projects/events for backup or transfer. not implemented yet.")
 	default:
 		fatal(fmt.Errorf("unknown command: %s", args[0]))
 	}

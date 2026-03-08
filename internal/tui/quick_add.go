@@ -11,6 +11,7 @@ func (m Model) viewQuickAdd() string {
 		"",
 		`Input examples:`,
 		`- plain title`,
+		`- cz - collision playground - allow fullscreen mode`,
 		`- cz - collision playground -> allow fullscreen mode`,
 		"",
 		m.quickInput.View(),

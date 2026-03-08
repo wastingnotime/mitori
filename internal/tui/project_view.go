@@ -55,6 +55,6 @@ func (m Model) viewProject() string {
 			lines = append(lines, fmt.Sprintf("- %s  %s  %s", evt.Timestamp.Format(time.RFC3339), title, formatEvent(evt)))
 		}
 	}
-	lines = append(lines, "", m.styles.hint.Render("q back"))
+	lines = append(lines, "", m.styles.hint.Render("Esc back"))
 	return m.styles.app.Render(strings.Join(lines, "\n"))
 }

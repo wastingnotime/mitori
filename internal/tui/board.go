@@ -9,7 +9,7 @@ import (
 )
 
 func (m Model) viewBoard() string {
-	header := m.styles.header.Render("MITORI v2.0  Observability board")
+	header := m.styles.header.Render("MITORI v0.2  Observability board")
 	filterLine := m.styles.hint.Render("filters: " + m.filterLabel)
 
 	columns := make([]string, 0, len(domain.LaneOrder))
@@ -26,12 +26,16 @@ func (m Model) viewBoard() string {
 			if p, ok := m.projects[t.ProjectID]; ok {
 				projectName = p.Name
 			}
-			line := fmt.Sprintf("%s | %s | %s | %s", t.Title, projectName, t.Initiative, t.EnergyType)
+			cardWidth := max(16, m.width/6-6)
+			line1 := truncateRight(strings.TrimSpace(t.Title), cardWidth)
+			line2 := truncateRight(fmt.Sprintf("%s · %s · %s", projectName, t.Initiative, t.EnergyType), cardWidth)
+			card := line1 + "\n" + m.styles.hint.Render(line2)
 			if idx == selected && i == m.laneIdx {
-				lines = append(lines, m.styles.cardActive.Render(line))
+				lines = append(lines, m.styles.cardActive.Render(card))
 			} else {
-				lines = append(lines, m.styles.card.Render(line))
+				lines = append(lines, m.styles.card.Render(card))
 			}
+			lines = append(lines, "")
 		}
 		if len(tasks) == 0 {
 			lines = append(lines, m.styles.hint.Render("(empty)"))
@@ -45,7 +49,17 @@ func (m Model) viewBoard() string {
 	}
 
 	status := m.styles.status.Render(m.status)
-	hint := m.styles.hint.Render("h/l lanes  j/k tasks  J/K reorder  / filters  A archive  a add  g project  ? help  q quit")
+	hint := m.styles.hint.Render("h/l lanes  j/k tasks  J/K reorder  e edit  X delete  / filters  A archive  a add  g project  ? help  q quit")
 	board := lipgloss.JoinHorizontal(lipgloss.Top, columns...)
 	return m.styles.app.Render(lipgloss.JoinVertical(lipgloss.Left, header, filterLine, "", board, "", status, hint))
+}
+
+func truncateRight(s string, maxLen int) string {
+	if maxLen <= 0 || len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
 }
