@@ -322,6 +322,9 @@ func (s *TaskService) Archive(ctx context.Context, taskID string) error {
 	if task.ArchivedAt != nil {
 		return nil
 	}
+	if task.Lane != domain.LaneDone {
+		return fmt.Errorf("archive is allowed only when task is in done")
+	}
 
 	fromLane := task.Lane
 	task.ArchivedAt = &now
@@ -336,6 +339,77 @@ func (s *TaskService) Archive(ctx context.Context, taskID string) error {
 			"from_lane": fromLane,
 		},
 	})
+	return s.store.Save(ctx, snap)
+}
+
+func (s *TaskService) EditTitle(ctx context.Context, taskID string, title string) error {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return fmt.Errorf("title is required")
+	}
+
+	snap, err := s.store.Load(ctx)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	task, ok := findTask(snap.Tasks, taskID)
+	if !ok {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("task is archived: %s", taskID)
+	}
+	if task.Lane != domain.LaneBacklog {
+		return fmt.Errorf("edit is allowed only when task is in backlog")
+	}
+	task.Title = title
+	task.UpdatedAt = now
+	appendEvent(&snap, domain.Event{
+		ID:        newID("evt"),
+		TaskID:    taskID,
+		Type:      domain.EventTaskUpdated,
+		Timestamp: now,
+		Payload: map[string]interface{}{
+			"action": "edit",
+		},
+	})
+	return s.store.Save(ctx, snap)
+}
+
+func (s *TaskService) Delete(ctx context.Context, taskID string) error {
+	snap, err := s.store.Load(ctx)
+	if err != nil {
+		return err
+	}
+
+	taskIdx := -1
+	for i, t := range snap.Tasks {
+		if t.ID == taskID {
+			taskIdx = i
+			if t.ArchivedAt != nil {
+				return fmt.Errorf("task is archived: %s", taskID)
+			}
+			if t.Lane != domain.LaneBacklog {
+				return fmt.Errorf("delete is allowed only when task is in backlog")
+			}
+			break
+		}
+	}
+	if taskIdx == -1 {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+
+	lane := snap.Tasks[taskIdx].Lane
+	snap.Tasks = slices.Delete(snap.Tasks, taskIdx, taskIdx+1)
+	filteredEvents := make([]domain.Event, 0, len(snap.Events))
+	for _, evt := range snap.Events {
+		if evt.TaskID != taskID {
+			filteredEvents = append(filteredEvents, evt)
+		}
+	}
+	snap.Events = filteredEvents
+	normalizeLanePositions(snap, lane)
 	return s.store.Save(ctx, snap)
 }
 

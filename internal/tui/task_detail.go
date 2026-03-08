@@ -47,7 +47,7 @@ func (m Model) viewTaskDetail() string {
 		m.styles.sectionTitle.Render("recent events"),
 		strings.Join(events, "\n"),
 		"",
-		m.styles.hint.Render("q back  p park/unpark  t touch  d done  b backlog  x archive"),
+		m.styles.hint.Render("Esc back  p park/unpark  t touch  d done  b backlog  x archive"),
 	}
 	return m.styles.app.Render(strings.Join(lines, "\n"))
 }
