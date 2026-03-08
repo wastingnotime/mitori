@@ -83,7 +83,12 @@ Deterministic type inference is applied from title text:
   - token forms: `project turtle`, `/project turtle`, `project:"name"`, `initiative cz`, `energy produces`, `type discovery`
 - Archive browser with `A` (respects active filters)
 - Manual reorder within lane with `K` (up) and `J` (down)
-- Lane-valid actions are shown per selected task and executed via semantic keys (for example: `p park/unpark`, `d done`, `b backlog`, `x archive`)
+- Lane-valid actions are shown per selected task and executed via semantic keys:
+  - `m` forward happy path
+  - `b` backward/reopen
+  - `s` halt/resume halt
+  - `p` park/unpark
+  - `x` archive boundary
 - Recovery/destructive actions require `y` confirmation
 - Project view (`g`) now includes:
   - counts by lane
@@ -98,3 +103,4 @@ Deterministic type inference is applied from title text:
 - Navigation:
   - `q` quits app
   - `Esc` backs out of screen/input
+  - `?` opens merged Help + About (with `j/k` scrolling)
