@@ -15,4 +15,6 @@ const (
 	screenQuickAdd
 	screenProjectView
 	screenHelp
+	screenSearch
+	screenArchive
 )

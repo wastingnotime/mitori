@@ -72,13 +72,6 @@ func (s *TaskService) Create(ctx context.Context, in CreateTaskInput) (domain.Ta
 		return domain.Task{}, err
 	}
 
-	position := 1
-	for _, t := range snap.Tasks {
-		if t.Lane == in.Lane && t.ArchivedAt == nil && t.Position >= position {
-			position = t.Position + 1
-		}
-	}
-
 	now := time.Now().UTC()
 	task := domain.Task{
 		ID:          newID("tsk"),
@@ -91,7 +84,7 @@ func (s *TaskService) Create(ctx context.Context, in CreateTaskInput) (domain.Ta
 		EnergyType:  in.EnergyType,
 		Nature:      in.Nature,
 		Lane:        in.Lane,
-		Position:    position,
+		Position:    nextLanePosition(snap, in.Lane),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -120,16 +113,45 @@ func (s *TaskService) ListActive(ctx context.Context) ([]domain.Task, error) {
 			out = append(out, t)
 		}
 	}
-	slices.SortFunc(out, func(a, b domain.Task) int {
-		if a.Lane != b.Lane {
-			return laneIndex(a.Lane) - laneIndex(b.Lane)
+	sortTasks(out)
+	return out, nil
+}
+
+func (s *TaskService) ListArchivedFiltered(ctx context.Context, filter TaskFilter) ([]domain.Task, map[string]domain.Project, error) {
+	snap, err := s.store.Load(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	projects := mapProjects(snap.Projects)
+	out := make([]domain.Task, 0)
+	for _, t := range snap.Tasks {
+		if t.ArchivedAt == nil {
+			continue
 		}
-		if a.Position != b.Position {
-			return a.Position - b.Position
+		projectName := ""
+		if p, ok := projects[t.ProjectID]; ok {
+			projectName = p.Name
+		}
+		if MatchTaskFilter(t, projectName, filter) {
+			out = append(out, t)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.Task) int {
+		if a.ArchivedAt != nil && b.ArchivedAt != nil && !a.ArchivedAt.Equal(*b.ArchivedAt) {
+			if a.ArchivedAt.After(*b.ArchivedAt) {
+				return -1
+			}
+			return 1
+		}
+		if a.UpdatedAt.After(b.UpdatedAt) {
+			return -1
+		}
+		if a.UpdatedAt.Before(b.UpdatedAt) {
+			return 1
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
-	return out, nil
+	return out, projects, nil
 }
 
 func (s *TaskService) ListByProjectID(ctx context.Context, projectID string) ([]domain.Task, error) {
@@ -163,40 +185,119 @@ func (s *TaskService) MoveLane(ctx context.Context, taskID string, lane domain.L
 	if !domain.ValidLane(lane) {
 		return fmt.Errorf("invalid lane: %s", lane)
 	}
-	return s.updateTask(ctx, taskID, func(t *domain.Task, now time.Time) (domain.EventType, map[string]interface{}, bool) {
-		old := t.Lane
-		if old == lane {
-			return "", nil, false
-		}
-		t.Lane = lane
-		t.UpdatedAt = now
-		return domain.EventLaneChanged, map[string]interface{}{
-			"from": old,
+
+	snap, err := s.store.Load(ctx)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	task, ok := findTask(snap.Tasks, taskID)
+	if !ok {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("task is archived: %s", taskID)
+	}
+	if task.Lane == lane {
+		return nil
+	}
+
+	oldLane := task.Lane
+	newPos := nextLanePosition(snap, lane)
+	task.Lane = lane
+	task.Position = newPos
+	task.UpdatedAt = now
+	normalizeLanePositions(snap, oldLane)
+	normalizeLanePositions(snap, lane)
+	appendEvent(&snap, domain.Event{
+		ID:        newID("evt"),
+		TaskID:    task.ID,
+		Type:      domain.EventLaneChanged,
+		Timestamp: now,
+		Payload: map[string]interface{}{
+			"from": oldLane,
 			"to":   lane,
-		}, true
+		},
 	})
+	return s.store.Save(ctx, snap)
 }
 
 func (s *TaskService) ToggleParking(ctx context.Context, taskID string) error {
-	return s.updateTask(ctx, taskID, func(t *domain.Task, now time.Time) (domain.EventType, map[string]interface{}, bool) {
-		if t.Lane == domain.LaneParking {
-			t.Lane = domain.LaneTodo
-			t.UpdatedAt = now
-			return domain.EventTaskUnparked, map[string]interface{}{"to": domain.LaneTodo}, true
-		}
-		from := t.Lane
-		t.Lane = domain.LaneParking
-		t.UpdatedAt = now
-		return domain.EventTaskParked, map[string]interface{}{"from": from}, true
+	snap, err := s.store.Load(ctx)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	task, ok := findTask(snap.Tasks, taskID)
+	if !ok {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("task is archived: %s", taskID)
+	}
+
+	oldLane := task.Lane
+	eventType := domain.EventTaskParked
+	payload := map[string]interface{}{"from": oldLane}
+
+	if oldLane == domain.LaneParking {
+		newPos := nextLanePosition(snap, domain.LaneTodo)
+		task.Lane = domain.LaneTodo
+		task.Position = newPos
+		eventType = domain.EventTaskUnparked
+		payload = map[string]interface{}{"to": domain.LaneTodo}
+	} else {
+		newPos := nextLanePosition(snap, domain.LaneParking)
+		task.Lane = domain.LaneParking
+		task.Position = newPos
+	}
+	task.UpdatedAt = now
+
+	normalizeLanePositions(snap, oldLane)
+	normalizeLanePositions(snap, task.Lane)
+	appendEvent(&snap, domain.Event{
+		ID:        newID("evt"),
+		TaskID:    task.ID,
+		Type:      eventType,
+		Timestamp: now,
+		Payload:   payload,
 	})
+	return s.store.Save(ctx, snap)
 }
 
 func (s *TaskService) Touch(ctx context.Context, taskID string) error {
-	return s.updateTask(ctx, taskID, func(t *domain.Task, now time.Time) (domain.EventType, map[string]interface{}, bool) {
-		t.UpdatedAt = now
-		t.LastTouchedAt = &now
-		return domain.EventTaskUpdated, map[string]interface{}{"action": "touch"}, true
+	snap, err := s.store.Load(ctx)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	task, ok := findTask(snap.Tasks, taskID)
+	if !ok {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("task is archived: %s", taskID)
+	}
+
+	// Bump touched task to the top of its current lane for better recency visibility.
+	task.Position = minLanePosition(snap, task.Lane) - 1
+	task.LastTouchedAt = &now
+	task.UpdatedAt = now
+	normalizeLanePositions(snap, task.Lane)
+	appendEvent(&snap, domain.Event{
+		ID:        newID("evt"),
+		TaskID:    task.ID,
+		Type:      domain.EventTaskUpdated,
+		Timestamp: now,
+		Payload: map[string]interface{}{
+			"action": "touch",
+			"bumped": true,
+		},
 	})
+	return s.store.Save(ctx, snap)
 }
 
 func (s *TaskService) MarkDone(ctx context.Context, taskID string) error {
@@ -208,14 +309,99 @@ func (s *TaskService) SendBacklog(ctx context.Context, taskID string) error {
 }
 
 func (s *TaskService) Archive(ctx context.Context, taskID string) error {
-	return s.updateTask(ctx, taskID, func(t *domain.Task, now time.Time) (domain.EventType, map[string]interface{}, bool) {
-		if t.ArchivedAt != nil {
-			return "", nil, false
-		}
-		t.ArchivedAt = &now
-		t.UpdatedAt = now
-		return domain.EventTaskArchived, nil, true
+	snap, err := s.store.Load(ctx)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	task, ok := findTask(snap.Tasks, taskID)
+	if !ok {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if task.ArchivedAt != nil {
+		return nil
+	}
+
+	fromLane := task.Lane
+	task.ArchivedAt = &now
+	task.UpdatedAt = now
+	normalizeLanePositions(snap, fromLane)
+	appendEvent(&snap, domain.Event{
+		ID:        newID("evt"),
+		TaskID:    task.ID,
+		Type:      domain.EventTaskArchived,
+		Timestamp: now,
+		Payload: map[string]interface{}{
+			"from_lane": fromLane,
+		},
 	})
+	return s.store.Save(ctx, snap)
+}
+
+func (s *TaskService) ReorderInLane(ctx context.Context, taskID string, direction int) error {
+	if direction != -1 && direction != 1 {
+		return fmt.Errorf("direction must be -1 or 1")
+	}
+	snap, err := s.store.Load(ctx)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	task, ok := findTask(snap.Tasks, taskID)
+	if !ok {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("task is archived: %s", taskID)
+	}
+
+	type laneRef struct {
+		idx int
+		pos int
+	}
+	refs := make([]laneRef, 0)
+	for i, t := range snap.Tasks {
+		if t.ArchivedAt != nil || t.Lane != task.Lane {
+			continue
+		}
+		refs = append(refs, laneRef{idx: i, pos: t.Position})
+	}
+	slices.SortFunc(refs, func(a, b laneRef) int { return a.pos - b.pos })
+	current := -1
+	for i, ref := range refs {
+		if snap.Tasks[ref.idx].ID == taskID {
+			current = i
+			break
+		}
+	}
+	if current == -1 {
+		return fmt.Errorf("task not found in lane ordering: %s", taskID)
+	}
+
+	target := current + direction
+	if target < 0 || target >= len(refs) {
+		return nil
+	}
+
+	a := refs[current].idx
+	b := refs[target].idx
+	snap.Tasks[a].Position, snap.Tasks[b].Position = snap.Tasks[b].Position, snap.Tasks[a].Position
+	snap.Tasks[a].UpdatedAt = now
+	snap.Tasks[b].UpdatedAt = now
+	normalizeLanePositions(snap, task.Lane)
+	appendEvent(&snap, domain.Event{
+		ID:        newID("evt"),
+		TaskID:    taskID,
+		Type:      domain.EventTaskUpdated,
+		Timestamp: now,
+		Payload: map[string]interface{}{
+			"action":    "reorder",
+			"direction": direction,
+		},
+	})
+	return s.store.Save(ctx, snap)
 }
 
 func (s *TaskService) RecentEvents(ctx context.Context, taskID string, limit int) ([]domain.Event, error) {
@@ -244,35 +430,82 @@ func (s *TaskService) RecentEvents(ctx context.Context, taskID string, limit int
 	return out, nil
 }
 
-type taskMutator func(task *domain.Task, now time.Time) (eventType domain.EventType, payload map[string]interface{}, changed bool)
+func appendEvent(snap *store.Snapshot, evt domain.Event) {
+	snap.Events = append(snap.Events, evt)
+}
 
-func (s *TaskService) updateTask(ctx context.Context, taskID string, mut taskMutator) error {
-	snap, err := s.store.Load(ctx)
-	if err != nil {
-		return err
+func findTask(tasks []domain.Task, taskID string) (*domain.Task, bool) {
+	for i := range tasks {
+		if tasks[i].ID == taskID {
+			return &tasks[i], true
+		}
 	}
+	return nil, false
+}
 
-	now := time.Now().UTC()
-	for i := range snap.Tasks {
-		if snap.Tasks[i].ID != taskID {
-			continue
+func nextLanePosition(snap store.Snapshot, lane domain.Lane) int {
+	maxPos := 0
+	for _, t := range snap.Tasks {
+		if t.ArchivedAt == nil && t.Lane == lane && t.Position > maxPos {
+			maxPos = t.Position
 		}
-		evtType, payload, changed := mut(&snap.Tasks[i], now)
-		if !changed {
-			return nil
-		}
-		if evtType != "" {
-			snap.Events = append(snap.Events, domain.Event{
-				ID:        newID("evt"),
-				TaskID:    taskID,
-				Type:      evtType,
-				Timestamp: now,
-				Payload:   payload,
-			})
-		}
-		return s.store.Save(ctx, snap)
 	}
-	return fmt.Errorf("task not found: %s", taskID)
+	return maxPos + 1
+}
+
+func minLanePosition(snap store.Snapshot, lane domain.Lane) int {
+	minPos := 1
+	found := false
+	for _, t := range snap.Tasks {
+		if t.ArchivedAt == nil && t.Lane == lane {
+			if !found || t.Position < minPos {
+				minPos = t.Position
+				found = true
+			}
+		}
+	}
+	if !found {
+		return 1
+	}
+	return minPos
+}
+
+func normalizeLanePositions(snap store.Snapshot, lane domain.Lane) {
+	indexes := make([]int, 0)
+	for i, t := range snap.Tasks {
+		if t.ArchivedAt == nil && t.Lane == lane {
+			indexes = append(indexes, i)
+		}
+	}
+	slices.SortFunc(indexes, func(a, b int) int {
+		if snap.Tasks[a].Position != snap.Tasks[b].Position {
+			return snap.Tasks[a].Position - snap.Tasks[b].Position
+		}
+		return strings.Compare(snap.Tasks[a].ID, snap.Tasks[b].ID)
+	})
+	for i, idx := range indexes {
+		snap.Tasks[idx].Position = i + 1
+	}
+}
+
+func mapProjects(projects []domain.Project) map[string]domain.Project {
+	out := make(map[string]domain.Project, len(projects))
+	for _, p := range projects {
+		out[p.ID] = p
+	}
+	return out
+}
+
+func sortTasks(tasks []domain.Task) {
+	slices.SortFunc(tasks, func(a, b domain.Task) int {
+		if a.Lane != b.Lane {
+			return laneIndex(a.Lane) - laneIndex(b.Lane)
+		}
+		if a.Position != b.Position {
+			return a.Position - b.Position
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
 }
 
 func laneIndex(lane domain.Lane) int {
