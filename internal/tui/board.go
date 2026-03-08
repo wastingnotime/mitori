@@ -49,9 +49,10 @@ func (m Model) viewBoard() string {
 	}
 
 	status := m.styles.status.Render(m.status)
-	hint := m.styles.hint.Render("h/l lanes  j/k tasks  J/K reorder  e edit  X delete  / filters  A archive  a add  g project  ? help  q quit")
+	hint := m.styles.hint.Render("h/l lanes  j/k tasks  J/K reorder  y confirm  t touch  / filters  A archive  a add  g project  ? help  q quit")
+	actionHint := m.styles.hint.Render(m.actionHint())
 	board := lipgloss.JoinHorizontal(lipgloss.Top, columns...)
-	return m.styles.app.Render(lipgloss.JoinVertical(lipgloss.Left, header, filterLine, "", board, "", status, hint))
+	return m.styles.app.Render(lipgloss.JoinVertical(lipgloss.Left, header, filterLine, "", board, "", status, actionHint, hint))
 }
 
 func truncateRight(s string, maxLen int) string {

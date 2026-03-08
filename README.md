@@ -12,7 +12,7 @@ Mitori is a local-first terminal Kanban for personal work observability.
 
 Board lanes:
 
-`backlog` `todo` `doing` `halt` `parking` `done`
+`backlog` `todo` `doing` `halt` `parking` `done` `archived`
 
 ## Requirements
 
@@ -76,20 +76,25 @@ Deterministic type inference is applied from title text:
 - `feat` keywords: add/implement/enable/support/allow...
 - fallback: `chore`
 
-## TUI additions in v2
+## TUI additions in v0.2
 
 - Board filters with `/`:
   - free-text search over title, description, project
   - token forms: `project turtle`, `/project turtle`, `project:"name"`, `initiative cz`, `energy produces`, `type discovery`
 - Archive browser with `A` (respects active filters)
 - Manual reorder within lane with `K` (up) and `J` (down)
+- Lane-valid actions are shown per selected task and executed via semantic keys (for example: `p park/unpark`, `d done`, `b backlog`, `x archive`)
+- Recovery/destructive actions require `y` confirmation
 - Project view (`g`) now includes:
   - counts by lane
   - recent project activity
 - Task detail includes payload-aware event history
-- Lifecycle rules:
-  - edit/delete only in `backlog`
-  - archive only in `done`
+- Transition model:
+  - normal and recovery transitions are centralized in domain/service logic
+  - `backlog -> archived` requires confirmation
+  - `done -> archived` is a normal forward transition
+  - archived restore paths (`archived -> done/backlog`) require confirmation
+  - edit/delete are backlog-only lane actions
 - Navigation:
   - `q` quits app
   - `Esc` backs out of screen/input

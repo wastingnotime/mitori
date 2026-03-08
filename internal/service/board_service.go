@@ -38,7 +38,7 @@ func (s *BoardService) BoardFiltered(ctx context.Context, filter TaskFilter, inc
 		board[lane] = []domain.Task{}
 	}
 	for _, t := range snap.Tasks {
-		if !includeArchived && t.ArchivedAt != nil {
+		if !includeArchived && t.Lane == domain.LaneArchived {
 			continue
 		}
 		projectName := ""
@@ -92,6 +92,7 @@ func (s *BoardService) ProjectOverview(ctx context.Context, projectID string, li
 	for _, lane := range domain.LaneOrder {
 		counts[lane] = 0
 	}
+	counts[domain.LaneArchived] = 0
 	projectTaskIDs := make(map[string]struct{})
 	taskTitles := make(map[string]string)
 	for _, t := range snap.Tasks {
@@ -100,8 +101,10 @@ func (s *BoardService) ProjectOverview(ctx context.Context, projectID string, li
 		}
 		projectTaskIDs[t.ID] = struct{}{}
 		taskTitles[t.ID] = t.Title
-		if t.ArchivedAt == nil {
+		if t.Lane != domain.LaneArchived {
 			counts[t.Lane]++
+		} else {
+			counts[domain.LaneArchived]++
 		}
 	}
 

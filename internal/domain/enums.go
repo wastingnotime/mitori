@@ -101,13 +101,24 @@ func ValidNature(v Nature) bool {
 type Lane string
 
 const (
-	LaneBacklog Lane = "backlog"
-	LaneTodo    Lane = "todo"
-	LaneDoing   Lane = "doing"
-	LaneHalt    Lane = "halt"
-	LaneParking Lane = "parking"
-	LaneDone    Lane = "done"
+	LaneBacklog  Lane = "backlog"
+	LaneTodo     Lane = "todo"
+	LaneDoing    Lane = "doing"
+	LaneHalt     Lane = "halt"
+	LaneParking  Lane = "parking"
+	LaneDone     Lane = "done"
+	LaneArchived Lane = "archived"
 )
+
+var AllLanes = []Lane{
+	LaneBacklog,
+	LaneTodo,
+	LaneDoing,
+	LaneHalt,
+	LaneParking,
+	LaneDone,
+	LaneArchived,
+}
 
 var LaneOrder = []Lane{
 	LaneBacklog,
@@ -119,7 +130,7 @@ var LaneOrder = []Lane{
 }
 
 func ValidLane(v Lane) bool {
-	return slices.Contains(LaneOrder, v)
+	return slices.Contains(AllLanes, v)
 }
 
 func LaneTitle(v Lane) string {
@@ -136,6 +147,8 @@ func LaneTitle(v Lane) string {
 		return "PARKING"
 	case LaneDone:
 		return "DONE"
+	case LaneArchived:
+		return "ARCHIVED"
 	default:
 		return string(v)
 	}

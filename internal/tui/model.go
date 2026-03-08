@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -36,12 +35,15 @@ type Model struct {
 	filter       service.TaskFilter
 	filterLabel  string
 	archiveTasks []domain.Task
+	archiveIdx   int
 	overview     service.ProjectOverview
 
 	quickInput    textinput.Model
 	searchInput   textinput.Model
 	editInput     textinput.Model
 	editingTaskID string
+	pendingTaskID string
+	pendingAction *domain.TaskAction
 }
 
 func NewModel(ctx context.Context, taskSvc *service.TaskService, projectSvc *service.ProjectService, boardSvc *service.BoardService) (Model, error) {
@@ -140,6 +142,20 @@ func (m Model) View() string {
 }
 
 func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingAction != nil {
+		switch msg.String() {
+		case "y":
+			return m.confirmPendingAction()
+		case "esc":
+			m.pendingAction = nil
+			m.pendingTaskID = ""
+			m.status = "Action canceled"
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
+
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -202,66 +218,44 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.status = "Filters cleared"
-	case "p":
-		return m.applyTaskAction("park/unpark", func(id string) error { return m.taskSvc.ToggleParking(m.ctx, id) })
 	case "t":
 		return m.applyTaskAction("touch", func(id string) error { return m.taskSvc.Touch(m.ctx, id) })
-	case "d":
-		return m.applyTaskAction("done", func(id string) error { return m.taskSvc.MarkDone(m.ctx, id) })
-	case "b":
-		return m.applyTaskAction("backlog", func(id string) error { return m.taskSvc.SendBacklog(m.ctx, id) })
-	case "x":
-		return m.applyTaskAction("archive", func(id string) error { return m.taskSvc.Archive(m.ctx, id) })
-	case "X":
-		return m.applyTaskAction("delete", func(id string) error { return m.taskSvc.Delete(m.ctx, id) })
-	case "m":
-		task, ok := m.currentTask()
-		if !ok {
-			m.status = "No task selected"
-			return m, nil
-		}
-		nextLane := domain.LaneOrder[(laneIndex(task.Lane)+1)%len(domain.LaneOrder)]
-		if err := m.taskSvc.MoveLane(m.ctx, task.ID, nextLane); err != nil {
-			m.status = fmt.Sprintf("move failed: %v", err)
-			return m, nil
-		}
-		if err := m.reload(); err != nil {
-			m.status = fmt.Sprintf("reload failed: %v", err)
-			return m, nil
-		}
-		m.status = "Task moved"
 	case "K":
 		return m.reorderCurrentTask(-1)
 	case "J":
 		return m.reorderCurrentTask(1)
-	case "e":
-		task, ok := m.currentTask()
-		if !ok {
-			m.status = "No task selected"
-			return m, nil
+	default:
+		if isSingleKey(msg.String()) {
+			return m.applyLaneActionByKey(msg.String())
 		}
-		m.editingTaskID = task.ID
-		m.editInput.SetValue(task.Title)
-		m.editInput.Focus()
-		m.screen = screenEdit
 	}
 	return m, nil
 }
 
 func (m Model) updateTaskDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingAction != nil {
+		switch msg.String() {
+		case "y":
+			return m.confirmPendingAction()
+		case "esc":
+			m.pendingAction = nil
+			m.pendingTaskID = ""
+			m.status = "Action canceled"
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
+
 	switch msg.String() {
 	case "esc":
 		m.screen = screenBoard
-	case "p":
-		return m.applyTaskAction("park/unpark", func(id string) error { return m.taskSvc.ToggleParking(m.ctx, id) })
 	case "t":
 		return m.applyTaskAction("touch", func(id string) error { return m.taskSvc.Touch(m.ctx, id) })
-	case "d":
-		return m.applyTaskAction("done", func(id string) error { return m.taskSvc.MarkDone(m.ctx, id) })
-	case "b":
-		return m.applyTaskAction("backlog", func(id string) error { return m.taskSvc.SendBacklog(m.ctx, id) })
-	case "x":
-		return m.applyTaskAction("archive", func(id string) error { return m.taskSvc.Archive(m.ctx, id) })
+	default:
+		if isSingleKey(msg.String()) {
+			return m.applyLaneActionByKey(msg.String())
+		}
 	}
 	return m, nil
 }
@@ -356,9 +350,29 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateArchive(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingAction != nil {
+		switch msg.String() {
+		case "y":
+			return m.confirmPendingAction()
+		case "esc":
+			m.pendingAction = nil
+			m.pendingTaskID = ""
+			m.status = "Action canceled"
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
+
 	switch msg.String() {
 	case "esc":
 		m.screen = screenBoard
+	case "j":
+		if len(m.archiveTasks) > 0 {
+			m.archiveIdx = min(len(m.archiveTasks)-1, m.archiveIdx+1)
+		}
+	case "k":
+		m.archiveIdx = max(0, m.archiveIdx-1)
 	case "/":
 		m.searchInput.SetValue(filterToInput(m.filter, m.projects))
 		m.searchInput.Focus()
@@ -374,6 +388,10 @@ func (m Model) updateArchive(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.status = "Filters cleared"
+	default:
+		if isSingleKey(msg.String()) {
+			return m.applyArchiveActionByKey(msg.String())
+		}
 	}
 	return m, nil
 }
@@ -405,6 +423,11 @@ func (m *Model) reloadArchive() error {
 		return err
 	}
 	m.archiveTasks = archived
+	if len(m.archiveTasks) == 0 {
+		m.archiveIdx = 0
+	} else if m.archiveIdx >= len(m.archiveTasks) {
+		m.archiveIdx = len(m.archiveTasks) - 1
+	}
 	return nil
 }
 
@@ -430,6 +453,138 @@ func (m Model) currentTask() (domain.Task, bool) {
 		idx = len(tasks) - 1
 	}
 	return tasks[idx], true
+}
+
+func (m Model) currentArchiveTask() (domain.Task, bool) {
+	if len(m.archiveTasks) == 0 {
+		return domain.Task{}, false
+	}
+	idx := m.archiveIdx
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(m.archiveTasks) {
+		idx = len(m.archiveTasks) - 1
+	}
+	return m.archiveTasks[idx], true
+}
+
+func (m Model) currentTaskActions() []domain.TaskAction {
+	task, ok := m.currentTask()
+	if !ok {
+		return nil
+	}
+	return m.taskSvc.AllowedActionsForTask(task)
+}
+
+func (m Model) taskActions(task domain.Task) []domain.TaskAction {
+	return m.taskSvc.AllowedActionsForTask(task)
+}
+
+func (m Model) applyLaneActionByKey(key string) (tea.Model, tea.Cmd) {
+	task, ok := m.currentTask()
+	if !ok {
+		m.status = "No task selected"
+		return m, nil
+	}
+	actions := m.taskActions(task)
+	return m.applyActionByKey(task, actions, key)
+}
+
+func (m Model) applyArchiveActionByKey(key string) (tea.Model, tea.Cmd) {
+	task, ok := m.currentArchiveTask()
+	if !ok {
+		m.status = "No archived task selected"
+		return m, nil
+	}
+	actions := m.taskActions(task)
+	return m.applyActionByKey(task, actions, key)
+}
+
+func (m Model) applyActionByKey(task domain.Task, actions []domain.TaskAction, key string) (tea.Model, tea.Cmd) {
+	if len(actions) == 0 {
+		m.status = "No valid actions for selected task"
+		return m, nil
+	}
+	for _, action := range actions {
+		if action.Shortcut == key {
+			return m.runTaskAction(task, action, false)
+		}
+	}
+	return m, nil
+}
+
+func (m Model) confirmPendingAction() (tea.Model, tea.Cmd) {
+	if m.pendingAction == nil || m.pendingTaskID == "" {
+		m.pendingAction = nil
+		m.pendingTaskID = ""
+		return m, nil
+	}
+	task, ok, err := m.taskSvc.Get(m.ctx, m.pendingTaskID)
+	if err != nil {
+		m.status = fmt.Sprintf("confirm failed: %v", err)
+		m.pendingAction = nil
+		m.pendingTaskID = ""
+		return m, nil
+	}
+	if !ok {
+		m.status = "Task no longer exists"
+		m.pendingAction = nil
+		m.pendingTaskID = ""
+		return m, nil
+	}
+	action := *m.pendingAction
+	return m.runTaskAction(task, action, true)
+}
+
+func (m Model) runTaskAction(task domain.Task, action domain.TaskAction, confirmed bool) (tea.Model, tea.Cmd) {
+	if action.RequiresConfirmation && !confirmed {
+		act := action
+		m.pendingAction = &act
+		m.pendingTaskID = task.ID
+		m.status = fmt.Sprintf("Confirm '%s' on '%s' with y, Esc to cancel", action.Label, task.Title)
+		return m, nil
+	}
+
+	var err error
+	switch action.Kind {
+	case domain.ActionMove:
+		err = m.taskSvc.Transition(m.ctx, task.ID, action.To, confirmed)
+	case domain.ActionEdit:
+		m.editingTaskID = task.ID
+		m.editInput.SetValue(task.Title)
+		m.editInput.Focus()
+		m.screen = screenEdit
+		m.pendingAction = nil
+		m.pendingTaskID = ""
+		return m, nil
+	case domain.ActionDelete:
+		err = m.taskSvc.Delete(m.ctx, task.ID, confirmed)
+	default:
+		err = fmt.Errorf("unsupported action: %s", action.Kind)
+	}
+	if err != nil {
+		m.pendingAction = nil
+		m.pendingTaskID = ""
+		m.status = fmt.Sprintf("action failed: %v", err)
+		return m, nil
+	}
+
+	m.pendingAction = nil
+	m.pendingTaskID = ""
+	if err := m.reload(); err != nil {
+		m.status = fmt.Sprintf("reload failed: %v", err)
+		return m, nil
+	}
+	events, evtErr := m.taskSvc.RecentEvents(m.ctx, task.ID, 16)
+	if evtErr == nil {
+		m.recentEvents = events
+	}
+	if m.projectViewID != "" {
+		_ = m.loadProjectOverview(m.projectViewID)
+	}
+	m.status = "Action applied"
+	return m, nil
 }
 
 func (m Model) applyTaskAction(name string, action func(taskID string) error) (tea.Model, tea.Cmd) {
@@ -482,10 +637,6 @@ func (m *Model) loadProjectOverview(projectID string) error {
 	}
 	m.overview = overview
 	return nil
-}
-
-func laneIndex(lane domain.Lane) int {
-	return slices.Index(domain.LaneOrder, lane)
 }
 
 func parseFilterInput(raw string, projects map[string]domain.Project) service.TaskFilter {
@@ -624,6 +775,29 @@ func filterToInput(filter service.TaskFilter, projects map[string]domain.Project
 		parts = append(parts, filter.Query)
 	}
 	return strings.Join(parts, " ")
+}
+
+func (m Model) actionHintForActions(actions []domain.TaskAction) string {
+	if len(actions) == 0 {
+		return "actions: none"
+	}
+	parts := make([]string, 0, len(actions))
+	for _, a := range actions {
+		label := a.Label
+		if a.RequiresConfirmation {
+			label += " (confirm)"
+		}
+		parts = append(parts, fmt.Sprintf("%s %s", a.Shortcut, label))
+	}
+	return "actions " + strings.Join(parts, "  ")
+}
+
+func isSingleKey(s string) bool {
+	return len(s) == 1
+}
+
+func (m Model) actionHint() string {
+	return m.actionHintForActions(m.currentTaskActions())
 }
 
 func max(a, b int) int {
