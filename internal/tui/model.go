@@ -42,8 +42,11 @@ type Model struct {
 	searchInput   textinput.Model
 	editInput     textinput.Model
 	editingTaskID string
+	editingBefore string
 	pendingTaskID string
 	pendingAction *domain.TaskAction
+	pendingQuit   bool
+	helpScroll    int
 }
 
 func NewModel(ctx context.Context, taskSvc *service.TaskService, projectSvc *service.ProjectService, boardSvc *service.BoardService) (Model, error) {
@@ -94,7 +97,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case tea.KeyMsg:
-		if msg.String() == "q" && m.screen != screenQuickAdd && m.screen != screenSearch && m.screen != screenEdit {
+		if m.pendingQuit {
+			switch msg.String() {
+			case "q":
+				return m, tea.Quit
+			case "esc":
+				m.pendingQuit = false
+				m.status = "Quit canceled"
+				return m, nil
+			default:
+				m.pendingQuit = false
+			}
+		}
+		if msg.String() == "q" {
+			if m.hasUnsavedInput() {
+				m.pendingQuit = true
+				m.status = "Unsaved input will be lost. Press q to quit, Esc to cancel."
+				return m, nil
+			}
 			return m, tea.Quit
 		}
 		switch m.screen {
@@ -104,11 +124,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateEdit(msg)
 		case screenTaskDetail:
 			return m.updateTaskDetail(msg)
-		case screenProjectView, screenHelp:
+		case screenProjectView:
 			if msg.String() == "esc" {
 				m.screen = screenBoard
 			}
 			return m, nil
+		case screenHelp:
+			return m.updateHelp(msg)
 		case screenSearch:
 			return m.updateSearch(msg)
 		case screenArchive:
@@ -200,6 +222,7 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.screen = screenProjectView
 	case "?":
+		m.helpScroll = 0
 		m.screen = screenHelp
 	case "/":
 		m.searchInput.SetValue(filterToInput(m.filter, m.projects))
@@ -302,6 +325,7 @@ func (m Model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.screen = screenBoard
 		m.editingTaskID = ""
+		m.editingBefore = ""
 		return m, nil
 	case "enter":
 		if m.editingTaskID == "" {
@@ -315,6 +339,7 @@ func (m Model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.screen = screenBoard
 		m.editingTaskID = ""
+		m.editingBefore = ""
 		if err := m.reload(); err != nil {
 			m.status = fmt.Sprintf("reload failed: %v", err)
 			return m, nil
@@ -347,6 +372,18 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.searchInput, cmd = m.searchInput.Update(msg)
 	return m, cmd
+}
+
+func (m Model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.screen = screenBoard
+	case "j":
+		m.helpScroll++
+	case "k":
+		m.helpScroll = max(0, m.helpScroll-1)
+	}
+	return m, nil
 }
 
 func (m Model) updateArchive(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -552,6 +589,7 @@ func (m Model) runTaskAction(task domain.Task, action domain.TaskAction, confirm
 		err = m.taskSvc.Transition(m.ctx, task.ID, action.To, confirmed)
 	case domain.ActionEdit:
 		m.editingTaskID = task.ID
+		m.editingBefore = task.Title
 		m.editInput.SetValue(task.Title)
 		m.editInput.Focus()
 		m.screen = screenEdit
@@ -794,6 +832,19 @@ func (m Model) actionHintForActions(actions []domain.TaskAction) string {
 
 func isSingleKey(s string) bool {
 	return len(s) == 1
+}
+
+func (m Model) hasUnsavedInput() bool {
+	switch m.screen {
+	case screenQuickAdd:
+		return strings.TrimSpace(m.quickInput.Value()) != ""
+	case screenSearch:
+		return strings.TrimSpace(m.searchInput.Value()) != ""
+	case screenEdit:
+		return strings.TrimSpace(m.editInput.Value()) != strings.TrimSpace(m.editingBefore)
+	default:
+		return false
+	}
 }
 
 func (m Model) actionHint() string {
