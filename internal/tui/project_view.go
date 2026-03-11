@@ -30,6 +30,17 @@ func (m Model) viewProject() string {
 		lines = append(lines, fmt.Sprintf("- %s: %d", strings.ToLower(domain.LaneTitle(lane)), m.overview.CountsByLane[lane]))
 	}
 
+	lines = append(lines, "", m.styles.sectionTitle.Render("energy"))
+	lines = append(lines, fmt.Sprintf("- total produces: %d", m.overview.EnergyTotal.Produces))
+	lines = append(lines, fmt.Sprintf("- total consumes: %d", m.overview.EnergyTotal.Consumes))
+	for _, lane := range []domain.Lane{domain.LaneTodo, domain.LaneDoing, domain.LaneParking, domain.LaneHalt, domain.LaneDone} {
+		entry := m.overview.EnergyByLane[lane]
+		lines = append(lines, fmt.Sprintf("- %s: produces %d, consumes %d", strings.ToLower(domain.LaneTitle(lane)), entry.Produces, entry.Consumes))
+	}
+	if m.overview.EnergyNote != "" {
+		lines = append(lines, m.styles.hint.Render("note: "+m.overview.EnergyNote))
+	}
+
 	lines = append(lines, "", m.styles.sectionTitle.Render("tasks by lane"))
 	for _, lane := range domain.LaneOrder {
 		lines = append(lines, m.styles.sectionTitle.Render(domain.LaneTitle(lane)))

@@ -65,6 +65,9 @@ func (s *BoardService) BoardFiltered(ctx context.Context, filter TaskFilter, inc
 type ProjectOverview struct {
 	Project       domain.Project
 	CountsByLane  map[domain.Lane]int
+	EnergyTotal   EnergySummary
+	EnergyByLane  map[domain.Lane]EnergySummary
+	EnergyNote    string
 	RecentEvents  []domain.Event
 	TaskTitleByID map[string]string
 }
@@ -95,10 +98,12 @@ func (s *BoardService) ProjectOverview(ctx context.Context, projectID string, li
 	counts[domain.LaneArchived] = 0
 	projectTaskIDs := make(map[string]struct{})
 	taskTitles := make(map[string]string)
+	projectTasks := make([]domain.Task, 0)
 	for _, t := range snap.Tasks {
 		if t.ProjectID != projectID {
 			continue
 		}
+		projectTasks = append(projectTasks, t)
 		projectTaskIDs[t.ID] = struct{}{}
 		taskTitles[t.ID] = t.Title
 		if t.Lane != domain.LaneArchived {
@@ -107,6 +112,7 @@ func (s *BoardService) ProjectOverview(ctx context.Context, projectID string, li
 			counts[domain.LaneArchived]++
 		}
 	}
+	energy := BuildProjectEnergySummary(projectTasks)
 
 	events := make([]domain.Event, 0)
 	for _, evt := range snap.Events {
@@ -130,6 +136,9 @@ func (s *BoardService) ProjectOverview(ctx context.Context, projectID string, li
 	return ProjectOverview{
 		Project:       project,
 		CountsByLane:  counts,
+		EnergyTotal:   energy.Total,
+		EnergyByLane:  energy.ByLane,
+		EnergyNote:    energy.Note,
 		RecentEvents:  events,
 		TaskTitleByID: taskTitles,
 	}, nil

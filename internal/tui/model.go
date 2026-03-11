@@ -34,6 +34,7 @@ type Model struct {
 
 	filter       service.TaskFilter
 	filterLabel  string
+	boardEnergy  service.BoardEnergySummary
 	archiveTasks []domain.Task
 	archiveIdx   int
 	overview     service.ProjectOverview
@@ -440,6 +441,7 @@ func (m *Model) reload() error {
 	}
 	m.board = board
 	m.projects = projects
+	m.boardEnergy = service.BuildBoardEnergySummary(board)
 	m.filterLabel = formatFilterLabel(m.filter, projects)
 	for _, lane := range domain.LaneOrder {
 		maxIdx := len(m.board[lane]) - 1
