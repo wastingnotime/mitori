@@ -67,7 +67,7 @@ func (m Model) viewBoard() string {
 	if m.boardEnergy.Note != "" {
 		noteLine = m.styles.hint.Render("note: " + m.boardEnergy.Note)
 	}
-	hint := m.styles.hint.Render("h/l lanes  j/k tasks  J/K reorder  y confirm  t touch  / filters  A archive  a add  g project  ? help  q quit")
+	hint := m.styles.hint.Render("h/l lanes  j/k tasks  J/K reorder  y confirm  t touch  / filters  c clear  C constellation  A archive  a add  g project  ? help  q quit")
 	actionHint := m.styles.hint.Render(m.actionHint())
 	board := lipgloss.JoinHorizontal(lipgloss.Top, columns...)
 	return m.styles.app.Render(lipgloss.JoinVertical(lipgloss.Left, header, filterLine, energyTotal, energyByLane, laneEnergyLine, taskEnergyLine, noteLine, "", board, "", status, actionHint, hint))

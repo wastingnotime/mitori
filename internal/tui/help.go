@@ -26,6 +26,7 @@ func (m Model) helpLines() []string {
 		"It exists to make work visible so you can steer manually.",
 		"It is not a productivity tracker, team PM tool, or planning SaaS.",
 		"The name points to seeing a situation clearly at a glance and grasping its structure.",
+		"Projects are the true continuity unit; use constellation view to read the full ecosystem.",
 		"",
 		m.styles.sectionTitle.Render("Lane Meanings"),
 		"- backlog: high-level intents and refinement queue",
@@ -59,9 +60,10 @@ func (m Model) helpLines() []string {
 		"- lane actions: shown dynamically for selected task",
 		"- a: quick add",
 		"- g: project view",
+		"- C: project constellation view",
 		"- /: filter input",
-		"- A: archive browser",
 		"- c: clear filters",
+		"- A: archive browser",
 		"- ?: open this Help + About screen",
 	}
 	return lines
