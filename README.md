@@ -37,8 +37,17 @@ go run ./cmd/mitori doctor
 go run ./cmd/mitori archive
 go run ./cmd/mitori archive crash
 go run ./cmd/mitori import          # placeholder, not implemented yet
-go run ./cmd/mitori export          # placeholder, not implemented yet
+go run ./cmd/mitori export board
+go run ./cmd/mitori export project "collision playground"
+go run ./cmd/mitori export task <task-id>
+go run ./cmd/mitori export archive
+go run ./cmd/mitori export board --format json
+go run ./cmd/mitori export board --out board.md
 ```
+
+`mitori export` creates portable knowledge artifacts from local board data/history.
+Supported formats: `markdown` (default) and `json`.  
+Use `--out` to write to a file; otherwise output is printed to stdout.
 
 Default data path:
 

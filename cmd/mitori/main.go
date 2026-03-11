@@ -2,15 +2,19 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/wastingnotime/mitori/internal/config"
 	"github.com/wastingnotime/mitori/internal/domain"
+	iexport "github.com/wastingnotime/mitori/internal/export"
 	"github.com/wastingnotime/mitori/internal/parser"
 	"github.com/wastingnotime/mitori/internal/service"
+	"github.com/wastingnotime/mitori/internal/store"
 	"github.com/wastingnotime/mitori/internal/store/file"
 	"github.com/wastingnotime/mitori/internal/tui"
 )
@@ -131,10 +135,119 @@ func main() {
 	case "import":
 		fmt.Println("import: intended to load tasks/projects/events from external data. not implemented yet.")
 	case "export":
-		fmt.Println("export: intended to write tasks/projects/events for backup or transfer. not implemented yet.")
+		if err := st.Init(ctx); err != nil {
+			fatal(err)
+		}
+		if err := runExport(ctx, st, args[1:]); err != nil {
+			fatal(err)
+		}
 	default:
 		fatal(fmt.Errorf("unknown command: %s", args[0]))
 	}
+}
+
+func runExport(ctx context.Context, st store.Store, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: mitori export <board|project|task|archive> [args] [--format markdown|json] [--out path]")
+	}
+
+	svc := iexport.NewService(st)
+	switch args[0] {
+	case "board":
+		format, out, _, err := parseExportFlags("export board", args[1:])
+		if err != nil {
+			return err
+		}
+		data, err := svc.BuildBoard(ctx)
+		if err != nil {
+			return err
+		}
+		content, err := renderExport(format, data, iexport.RenderBoardMarkdown)
+		if err != nil {
+			return err
+		}
+		return writeExportOutput(out, content)
+	case "project":
+		format, out, rest, err := parseExportFlags("export project", args[1:])
+		if err != nil {
+			return err
+		}
+		if len(rest) < 1 {
+			return fmt.Errorf("usage: mitori export project <project-name-or-id> [--format markdown|json] [--out path]")
+		}
+		data, err := svc.BuildProject(ctx, strings.Join(rest, " "))
+		if err != nil {
+			return err
+		}
+		content, err := renderExport(format, data, iexport.RenderProjectMarkdown)
+		if err != nil {
+			return err
+		}
+		return writeExportOutput(out, content)
+	case "task":
+		format, out, rest, err := parseExportFlags("export task", args[1:])
+		if err != nil {
+			return err
+		}
+		if len(rest) != 1 {
+			return fmt.Errorf("usage: mitori export task <task-id> [--format markdown|json] [--out path]")
+		}
+		data, err := svc.BuildTask(ctx, rest[0])
+		if err != nil {
+			return err
+		}
+		content, err := renderExport(format, data, iexport.RenderTaskMarkdown)
+		if err != nil {
+			return err
+		}
+		return writeExportOutput(out, content)
+	case "archive":
+		format, out, _, err := parseExportFlags("export archive", args[1:])
+		if err != nil {
+			return err
+		}
+		data, err := svc.BuildArchive(ctx)
+		if err != nil {
+			return err
+		}
+		content, err := renderExport(format, data, iexport.RenderArchiveMarkdown)
+		if err != nil {
+			return err
+		}
+		return writeExportOutput(out, content)
+	default:
+		return fmt.Errorf("unknown export target: %s", args[0])
+	}
+}
+
+func parseExportFlags(name string, args []string) (format string, out string, rest []string, err error) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	formatPtr := fs.String("format", "markdown", "")
+	outPtr := fs.String("out", "", "")
+	if err := fs.Parse(args); err != nil {
+		return "", "", nil, err
+	}
+	return strings.ToLower(strings.TrimSpace(*formatPtr)), strings.TrimSpace(*outPtr), fs.Args(), nil
+}
+
+func renderExport[T any](format string, data T, md func(T) string) (string, error) {
+	switch format {
+	case "markdown":
+		return md(data), nil
+	case "json":
+		return iexport.RenderJSON(data)
+	default:
+		return "", fmt.Errorf("unsupported format: %s (use markdown or json)", format)
+	}
+}
+
+func writeExportOutput(outPath, content string) error {
+	if outPath == "" {
+		fmt.Print(content)
+		return nil
+	}
+	return os.WriteFile(outPath, []byte(content), 0o644)
 }
 
 func fatal(err error) {
