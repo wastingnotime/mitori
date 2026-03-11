@@ -45,7 +45,10 @@ type Model struct {
 	searchInput   textinput.Model
 	editInput     textinput.Model
 	editingTaskID string
-	editingBefore string
+	editOriginal  service.EditTaskInput
+	editDraft     service.EditTaskInput
+	editFieldIdx  int
+	editExitArmed bool
 	pendingTaskID string
 	pendingAction *domain.TaskAction
 	pendingQuit   bool
@@ -65,7 +68,7 @@ func NewModel(ctx context.Context, taskSvc *service.TaskService, projectSvc *ser
 	searchInput.Width = 72
 
 	editInput := textinput.New()
-	editInput.Placeholder = "new task title"
+	editInput.Placeholder = "edit value"
 	editInput.CharLimit = 220
 	editInput.Width = 72
 
@@ -334,11 +337,45 @@ func (m Model) updateQuickAdd(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.editExitArmed {
+		switch msg.String() {
+		case "esc":
+			m.screen = screenBoard
+			m.editingTaskID = ""
+			m.editOriginal = service.EditTaskInput{}
+			m.editDraft = service.EditTaskInput{}
+			m.editExitArmed = false
+			m.status = "Edit canceled"
+			return m, nil
+		default:
+			m.editExitArmed = false
+		}
+	}
+
 	switch msg.String() {
 	case "esc":
+		if m.editFormDirty() {
+			m.editExitArmed = true
+			m.status = "Unsaved edits will be lost. Press Esc again to discard."
+			return m, nil
+		}
 		m.screen = screenBoard
 		m.editingTaskID = ""
-		m.editingBefore = ""
+		m.editOriginal = service.EditTaskInput{}
+		m.editDraft = service.EditTaskInput{}
+		m.editExitArmed = false
+		return m, nil
+	case "shift+tab":
+		m.applyEditFieldValue(m.editFieldKey(), m.editInput.Value())
+		m.editFieldIdx = max(0, m.editFieldIdx-1)
+		m.editInput.SetValue(m.currentEditFieldValue())
+		m.editInput.CursorEnd()
+		return m, nil
+	case "tab":
+		m.applyEditFieldValue(m.editFieldKey(), m.editInput.Value())
+		m.editFieldIdx = min(len(editFieldKeys())-1, m.editFieldIdx+1)
+		m.editInput.SetValue(m.currentEditFieldValue())
+		m.editInput.CursorEnd()
 		return m, nil
 	case "enter":
 		if m.editingTaskID == "" {
@@ -346,13 +383,16 @@ func (m Model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = screenBoard
 			return m, nil
 		}
-		if err := m.taskSvc.EditTitle(m.ctx, m.editingTaskID, m.editInput.Value()); err != nil {
+		m.applyEditFieldValue(m.editFieldKey(), m.editInput.Value())
+		if err := m.taskSvc.Edit(m.ctx, m.editingTaskID, m.editDraft); err != nil {
 			m.status = fmt.Sprintf("edit failed: %v", err)
 			return m, nil
 		}
 		m.screen = screenBoard
 		m.editingTaskID = ""
-		m.editingBefore = ""
+		m.editOriginal = service.EditTaskInput{}
+		m.editDraft = service.EditTaskInput{}
+		m.editExitArmed = false
 		if err := m.reload(); err != nil {
 			m.status = fmt.Sprintf("reload failed: %v", err)
 			return m, nil
@@ -629,11 +669,7 @@ func (m Model) runTaskAction(task domain.Task, action domain.TaskAction, confirm
 	case domain.ActionMove:
 		err = m.taskSvc.Transition(m.ctx, task.ID, action.To, confirmed)
 	case domain.ActionEdit:
-		m.editingTaskID = task.ID
-		m.editingBefore = task.Title
-		m.editInput.SetValue(task.Title)
-		m.editInput.Focus()
-		m.screen = screenEdit
+		m.startEdit(task)
 		m.pendingAction = nil
 		m.pendingTaskID = ""
 		return m, nil
@@ -902,7 +938,7 @@ func (m Model) hasUnsavedInput() bool {
 	case screenSearch:
 		return strings.TrimSpace(m.searchInput.Value()) != ""
 	case screenEdit:
-		return strings.TrimSpace(m.editInput.Value()) != strings.TrimSpace(m.editingBefore)
+		return m.editFormDirty()
 	default:
 		return false
 	}
@@ -933,6 +969,137 @@ func (m Model) currentConstellationProject() (service.ConstellationProject, bool
 		idx = len(projects) - 1
 	}
 	return projects[idx], true
+}
+
+func (m *Model) startEdit(task domain.Task) {
+	projectName := "general"
+	if p, ok := m.projects[task.ProjectID]; ok {
+		projectName = p.Name
+	}
+	m.editingTaskID = task.ID
+	m.editOriginal = service.EditTaskInput{
+		Title:       task.Title,
+		Description: task.Description,
+		ProjectName: projectName,
+		Initiative:  task.Initiative,
+		Type:        task.Type,
+		Loop:        task.Loop,
+		EnergyType:  task.EnergyType,
+		Nature:      task.Nature,
+	}
+	m.editDraft = m.editOriginal
+	m.editFieldIdx = 0
+	m.editExitArmed = false
+	m.editInput.SetValue(m.currentEditFieldValue())
+	m.editInput.Focus()
+	m.editInput.CursorEnd()
+	m.screen = screenEdit
+}
+
+func editFieldKeys() []string {
+	return []string{
+		"title",
+		"description",
+		"project",
+		"initiative",
+		"type",
+		"loop",
+		"energy",
+		"nature",
+	}
+}
+
+func editFieldLabel(key string) string {
+	switch key {
+	case "title":
+		return "title"
+	case "description":
+		return "description"
+	case "project":
+		return "project"
+	case "initiative":
+		return "initiative"
+	case "type":
+		return "type"
+	case "loop":
+		return "loop"
+	case "energy":
+		return "energy_type"
+	case "nature":
+		return "nature"
+	default:
+		return key
+	}
+}
+
+func (m Model) editFieldKey() string {
+	keys := editFieldKeys()
+	if m.editFieldIdx < 0 {
+		return keys[0]
+	}
+	if m.editFieldIdx >= len(keys) {
+		return keys[len(keys)-1]
+	}
+	return keys[m.editFieldIdx]
+}
+
+func (m Model) currentEditFieldValue() string {
+	switch m.editFieldKey() {
+	case "title":
+		return m.editDraft.Title
+	case "description":
+		return m.editDraft.Description
+	case "project":
+		return m.editDraft.ProjectName
+	case "initiative":
+		return string(m.editDraft.Initiative)
+	case "type":
+		return string(m.editDraft.Type)
+	case "loop":
+		return string(m.editDraft.Loop)
+	case "energy":
+		return string(m.editDraft.EnergyType)
+	case "nature":
+		return string(m.editDraft.Nature)
+	default:
+		return ""
+	}
+}
+
+func (m *Model) applyEditFieldValue(key, value string) {
+	v := strings.TrimSpace(value)
+	switch key {
+	case "title":
+		m.editDraft.Title = v
+	case "description":
+		m.editDraft.Description = v
+	case "project":
+		m.editDraft.ProjectName = v
+	case "initiative":
+		m.editDraft.Initiative = domain.Initiative(strings.ToLower(v))
+	case "type":
+		m.editDraft.Type = domain.TaskType(strings.ToLower(v))
+	case "loop":
+		m.editDraft.Loop = domain.Loop(strings.ToLower(v))
+	case "energy":
+		m.editDraft.EnergyType = domain.EnergyType(strings.ToLower(v))
+	case "nature":
+		m.editDraft.Nature = domain.Nature(strings.ToLower(v))
+	}
+}
+
+func (m Model) editFormDirty() bool {
+	if strings.TrimSpace(m.editInput.Value()) != strings.TrimSpace(m.currentEditFieldValue()) {
+		return true
+	}
+	return strings.TrimSpace(m.editDraft.Title) != strings.TrimSpace(m.editOriginal.Title) ||
+		strings.TrimSpace(m.editDraft.Description) != strings.TrimSpace(m.editOriginal.Description) ||
+		strings.TrimSpace(m.editDraft.ProjectName) != strings.TrimSpace(m.editOriginal.ProjectName) ||
+		m.editDraft.Initiative != m.editOriginal.Initiative ||
+		m.editDraft.Type != m.editOriginal.Type ||
+		m.editDraft.Loop != m.editOriginal.Loop ||
+		m.editDraft.EnergyType != m.editOriginal.EnergyType ||
+		m.editDraft.Nature != m.editOriginal.Nature
 }
 
 func max(a, b int) int {
