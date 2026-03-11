@@ -10,12 +10,12 @@ import (
 
 func (m Model) viewProject() string {
 	if m.projectViewID == "" {
-		return m.styles.app.Render("No project selected.\n\nPress q to go back.")
+		return m.styles.app.Render("No project selected.\n\nPress Esc to go back.")
 	}
 
 	project := m.overview.Project
 	if project.ID == "" {
-		return m.styles.app.Render("Project not found.\n\nPress q to go back.")
+		return m.styles.app.Render("Project not found.\n\nPress Esc to go back.")
 	}
 
 	lines := []string{

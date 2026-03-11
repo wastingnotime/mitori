@@ -14,6 +14,7 @@ const (
 	screenTaskDetail
 	screenQuickAdd
 	screenProjectView
+	screenConstellation
 	screenHelp
 	screenSearch
 	screenArchive

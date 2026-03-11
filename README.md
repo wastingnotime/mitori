@@ -95,6 +95,7 @@ Deterministic type inference is applied from title text:
   - project view shows produces/consumes totals and lane-level energy mix
   - selected task context surfaces `energy_type` and `nature`
 - Archive browser with `A` (respects active filters)
+- Project constellation view with `C` (ecosystem view grouped by initiative)
 - Manual reorder within lane with `K` (up) and `J` (down)
 - Lane-valid actions are shown per selected task and executed via semantic keys:
   - `m` forward happy path

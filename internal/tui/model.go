@@ -32,12 +32,14 @@ type Model struct {
 	recentEvents  []domain.Event
 	projectViewID string
 
-	filter       service.TaskFilter
-	filterLabel  string
-	boardEnergy  service.BoardEnergySummary
-	archiveTasks []domain.Task
-	archiveIdx   int
-	overview     service.ProjectOverview
+	filter           service.TaskFilter
+	filterLabel      string
+	boardEnergy      service.BoardEnergySummary
+	archiveTasks     []domain.Task
+	archiveIdx       int
+	overview         service.ProjectOverview
+	constellation    service.ProjectConstellation
+	constellationIdx int
 
 	quickInput    textinput.Model
 	searchInput   textinput.Model
@@ -130,6 +132,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenBoard
 			}
 			return m, nil
+		case screenConstellation:
+			return m.updateConstellation(msg)
 		case screenHelp:
 			return m.updateHelp(msg)
 		case screenSearch:
@@ -151,6 +155,8 @@ func (m Model) View() string {
 		return m.viewQuickAdd()
 	case screenProjectView:
 		return m.viewProject()
+	case screenConstellation:
+		return m.viewConstellation()
 	case screenHelp:
 		return m.viewHelp()
 	case screenSearch:
@@ -235,6 +241,12 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.screen = screenArchive
+	case "C":
+		if err := m.loadConstellation(); err != nil {
+			m.status = fmt.Sprintf("load constellation failed: %v", err)
+			return m, nil
+		}
+		m.screen = screenConstellation
 	case "c":
 		m.filter = service.TaskFilter{}
 		if err := m.reload(); err != nil {
@@ -383,6 +395,33 @@ func (m Model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpScroll++
 	case "k":
 		m.helpScroll = max(0, m.helpScroll-1)
+	}
+	return m, nil
+}
+
+func (m Model) updateConstellation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.screen = screenBoard
+	case "j":
+		total := len(m.constellationProjects())
+		if total > 0 {
+			m.constellationIdx = min(total-1, m.constellationIdx+1)
+		}
+	case "k":
+		m.constellationIdx = max(0, m.constellationIdx-1)
+	case "enter":
+		project, ok := m.currentConstellationProject()
+		if !ok {
+			m.status = "No project selected"
+			return m, nil
+		}
+		m.projectViewID = project.Project.ID
+		if err := m.loadProjectOverview(project.Project.ID); err != nil {
+			m.status = fmt.Sprintf("load project overview failed: %v", err)
+			return m, nil
+		}
+		m.screen = screenProjectView
 	}
 	return m, nil
 }
@@ -679,6 +718,26 @@ func (m *Model) loadProjectOverview(projectID string) error {
 	return nil
 }
 
+func (m *Model) loadConstellation() error {
+	constellation, err := m.boardSvc.ProjectConstellation(m.ctx)
+	if err != nil {
+		return err
+	}
+	m.constellation = constellation
+	total := len(m.constellationProjects())
+	if total == 0 {
+		m.constellationIdx = 0
+		return nil
+	}
+	if m.constellationIdx >= total {
+		m.constellationIdx = total - 1
+	}
+	if m.constellationIdx < 0 {
+		m.constellationIdx = 0
+	}
+	return nil
+}
+
 func parseFilterInput(raw string, projects map[string]domain.Project) service.TaskFilter {
 	parts := splitFilterArgs(strings.TrimSpace(raw))
 	filter := service.TaskFilter{}
@@ -851,6 +910,29 @@ func (m Model) hasUnsavedInput() bool {
 
 func (m Model) actionHint() string {
 	return m.actionHintForActions(m.currentTaskActions())
+}
+
+func (m Model) constellationProjects() []service.ConstellationProject {
+	out := make([]service.ConstellationProject, 0)
+	for _, group := range m.constellation.Groups {
+		out = append(out, group.Projects...)
+	}
+	return out
+}
+
+func (m Model) currentConstellationProject() (service.ConstellationProject, bool) {
+	projects := m.constellationProjects()
+	if len(projects) == 0 {
+		return service.ConstellationProject{}, false
+	}
+	idx := m.constellationIdx
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(projects) {
+		idx = len(projects) - 1
+	}
+	return projects[idx], true
 }
 
 func max(a, b int) int {
