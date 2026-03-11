@@ -23,6 +23,17 @@ type CreateTaskInput struct {
 	Lane        domain.Lane
 }
 
+type EditTaskInput struct {
+	Title       string
+	Description string
+	ProjectName string
+	Initiative  domain.Initiative
+	Type        domain.TaskType
+	Loop        domain.Loop
+	EnergyType  domain.EnergyType
+	Nature      domain.Nature
+}
+
 type TaskService struct {
 	store      store.Store
 	projectSvc *ProjectService
@@ -309,9 +320,65 @@ func (s *TaskService) Touch(ctx context.Context, taskID string) error {
 }
 
 func (s *TaskService) EditTitle(ctx context.Context, taskID string, title string) error {
-	title = strings.TrimSpace(title)
+	task, ok, err := s.Get(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	projectName := "general"
+	snap, err := s.store.Load(ctx)
+	if err != nil {
+		return err
+	}
+	for _, p := range snap.Projects {
+		if p.ID == task.ProjectID {
+			projectName = p.Name
+			break
+		}
+	}
+	return s.Edit(ctx, taskID, EditTaskInput{
+		Title:       title,
+		Description: task.Description,
+		ProjectName: projectName,
+		Initiative:  task.Initiative,
+		Type:        task.Type,
+		Loop:        task.Loop,
+		EnergyType:  task.EnergyType,
+		Nature:      task.Nature,
+	})
+}
+
+func (s *TaskService) Edit(ctx context.Context, taskID string, in EditTaskInput) error {
+	title := strings.TrimSpace(in.Title)
 	if title == "" {
 		return fmt.Errorf("title is required")
+	}
+	description := strings.TrimSpace(in.Description)
+	projectName := strings.TrimSpace(in.ProjectName)
+	if projectName == "" {
+		return fmt.Errorf("project is required")
+	}
+	if !domain.ValidInitiative(in.Initiative) {
+		return fmt.Errorf("initiative is invalid")
+	}
+	if !domain.ValidTaskType(in.Type) {
+		return fmt.Errorf("task type is invalid")
+	}
+	if !domain.ValidLoop(in.Loop) {
+		return fmt.Errorf("loop is invalid")
+	}
+	if !domain.ValidEnergyType(in.EnergyType) {
+		return fmt.Errorf("energy type is invalid")
+	}
+	if !domain.ValidNature(in.Nature) {
+		return fmt.Errorf("nature is invalid")
+	}
+
+	project, err := s.projectSvc.Ensure(ctx, in.Initiative, projectName)
+	if err != nil {
+		return err
 	}
 
 	snap, err := s.store.Load(ctx)
@@ -330,6 +397,13 @@ func (s *TaskService) EditTitle(ctx context.Context, taskID string, title string
 	}
 
 	task.Title = title
+	task.Description = description
+	task.ProjectID = project.ID
+	task.Initiative = in.Initiative
+	task.Type = in.Type
+	task.Loop = in.Loop
+	task.EnergyType = in.EnergyType
+	task.Nature = in.Nature
 	task.UpdatedAt = now
 	appendEvent(&snap, domain.Event{
 		ID:        newID("evt"),
@@ -338,6 +412,16 @@ func (s *TaskService) EditTitle(ctx context.Context, taskID string, title string
 		Timestamp: now,
 		Payload: map[string]interface{}{
 			"action": "edit",
+			"fields": []string{
+				"title",
+				"description",
+				"project",
+				"initiative",
+				"type",
+				"loop",
+				"energy_type",
+				"nature",
+			},
 		},
 	})
 	return s.store.Save(ctx, snap)
