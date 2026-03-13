@@ -89,11 +89,13 @@ Deterministic type inference is applied from title text:
 
 - Board filters with `/`:
   - free-text search over title, description, project
-  - token forms: `project turtle`, `/project turtle`, `project:"name"`, `initiative cz`, `energy produces`, `type discovery`
+  - token forms: `project turtle`, `/project turtle`, `project:"name"`, `initiative cz`, `energy produces|neutral|consumes`, `type discovery`
 - Energy observability is descriptive (manual steering, no automation):
-  - board shows total produces/consumes and compact by-lane energy counts
-  - project view shows produces/consumes totals and lane-level energy mix
+  - board shows total produces/neutral/consumes and compact by-lane energy counts
+  - project view shows produces/neutral/consumes totals and lane-level energy mix
   - selected task context surfaces `energy_type` and `nature`
+- Quick add supports up/down history and lightweight structured autocomplete (`ctrl+n`)
+- Edit form supports lightweight structured autocomplete (`ctrl+n`) for structured fields
 - Archive browser with `A` (respects active filters)
 - Project constellation view with `C` (ecosystem view grouped by initiative)
 - Manual reorder within lane with `K` (up) and `J` (down)

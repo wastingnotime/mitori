@@ -137,6 +137,49 @@ func TestTaskService_Edit_BacklogPersistsAndRecordsEvent(t *testing.T) {
 	}
 }
 
+func TestTaskService_CreateAndEdit_NeutralEnergy(t *testing.T) {
+	t.Parallel()
+
+	svc := newTaskServiceForTest(t)
+	ctx := context.Background()
+	task, err := svc.Create(ctx, CreateTaskInput{
+		Title:       "neutral task",
+		Initiative:  domain.InitiativeWNT,
+		ProjectName: "core shell",
+		Type:        domain.TaskTypeChore,
+		Loop:        domain.LoopCoreValue,
+		EnergyType:  domain.EnergyNeutral,
+		Nature:      domain.NatureShizen,
+		Lane:        domain.LaneBacklog,
+	})
+	mustNoErr(t, err)
+
+	if task.EnergyType != domain.EnergyNeutral {
+		t.Fatalf("expected created task neutral energy, got %s", task.EnergyType)
+	}
+
+	err = svc.Edit(ctx, task.ID, EditTaskInput{
+		Title:       task.Title,
+		Description: task.Description,
+		ProjectName: "core shell",
+		Initiative:  task.Initiative,
+		Type:        task.Type,
+		Loop:        task.Loop,
+		EnergyType:  domain.EnergyNeutral,
+		Nature:      task.Nature,
+	})
+	mustNoErr(t, err)
+
+	edited, ok, err := svc.Get(ctx, task.ID)
+	mustNoErr(t, err)
+	if !ok {
+		t.Fatalf("task not found after edit: %s", task.ID)
+	}
+	if edited.EnergyType != domain.EnergyNeutral {
+		t.Fatalf("expected neutral energy to be preserved, got %s", edited.EnergyType)
+	}
+}
+
 func newTaskServiceForTest(t *testing.T) *TaskService {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "data.json")

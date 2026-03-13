@@ -58,7 +58,7 @@ func (m Model) helpLines() []string {
 		"- J/K: reorder within lane",
 		"- t: touch task",
 		"- lane actions: shown dynamically for selected task",
-		"- a: quick add",
+		"- a: quick add (up/down history, ctrl+n autocomplete)",
 		"- g: project view",
 		"- C: project constellation view",
 		"- /: filter input",

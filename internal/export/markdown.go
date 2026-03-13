@@ -12,7 +12,7 @@ func RenderBoardMarkdown(data BoardExport) string {
 	fmt.Fprintf(&b, "# Mitori Board Export\n\n")
 	fmt.Fprintf(&b, "- generated_at: %s\n", data.GeneratedAt.Format("2006-01-02 15:04:05 MST"))
 	fmt.Fprintf(&b, "- active_filters: %s\n", data.ActiveFilters)
-	fmt.Fprintf(&b, "- energy total: produces %d, consumes %d\n", data.Energy.Total.Produces, data.Energy.Total.Consumes)
+	fmt.Fprintf(&b, "- energy total: produces %d, neutral %d, consumes %d\n", data.Energy.Total.Produces, data.Energy.Total.Neutral, data.Energy.Total.Consumes)
 	if data.Energy.Note != "" {
 		fmt.Fprintf(&b, "- note: %s\n", data.Energy.Note)
 	}
@@ -44,7 +44,7 @@ func RenderProjectMarkdown(data ProjectExport) string {
 	if strings.TrimSpace(data.Project.Description) != "" {
 		fmt.Fprintf(&b, "- description: %s\n", data.Project.Description)
 	}
-	fmt.Fprintf(&b, "- energy total: produces %d, consumes %d\n", data.EnergyTotal.Produces, data.EnergyTotal.Consumes)
+	fmt.Fprintf(&b, "- energy total: produces %d, neutral %d, consumes %d\n", data.EnergyTotal.Produces, data.EnergyTotal.Neutral, data.EnergyTotal.Consumes)
 	if data.EnergyNote != "" {
 		fmt.Fprintf(&b, "- note: %s\n", data.EnergyNote)
 	}

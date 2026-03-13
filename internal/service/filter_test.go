@@ -29,6 +29,7 @@ func TestMatchTaskFilter(t *testing.T) {
 		{"mismatch_by_initiative", TaskFilter{Initiative: domain.InitiativeWNT}, false},
 		{"match_by_energy", TaskFilter{EnergyType: domain.EnergyProduces}, true},
 		{"mismatch_by_energy", TaskFilter{EnergyType: domain.EnergyConsumes}, false},
+		{"mismatch_by_energy_neutral", TaskFilter{EnergyType: domain.EnergyNeutral}, false},
 		{"match_by_task_type", TaskFilter{TaskType: domain.TaskTypeFix}, true},
 		{"mismatch_by_task_type", TaskFilter{TaskType: domain.TaskTypeFeat}, false},
 		{"match_by_query_title", TaskFilter{Query: "fullscreen"}, true},

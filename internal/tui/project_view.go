@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/wastingnotime/mitori/internal/domain"
+	"github.com/wastingnotime/mitori/internal/service"
 )
 
 func (m Model) viewProject() string {
@@ -32,10 +33,11 @@ func (m Model) viewProject() string {
 
 	lines = append(lines, "", m.styles.sectionTitle.Render("energy"))
 	lines = append(lines, fmt.Sprintf("- total produces: %d", m.overview.EnergyTotal.Produces))
+	lines = append(lines, fmt.Sprintf("- total neutral: %d", m.overview.EnergyTotal.Neutral))
 	lines = append(lines, fmt.Sprintf("- total consumes: %d", m.overview.EnergyTotal.Consumes))
 	for _, lane := range []domain.Lane{domain.LaneTodo, domain.LaneDoing, domain.LaneParking, domain.LaneHalt, domain.LaneDone} {
 		entry := m.overview.EnergyByLane[lane]
-		lines = append(lines, fmt.Sprintf("- %s: produces %d, consumes %d", strings.ToLower(domain.LaneTitle(lane)), entry.Produces, entry.Consumes))
+		lines = append(lines, fmt.Sprintf("- %s: produces %d, neutral %d, consumes %d", strings.ToLower(domain.LaneTitle(lane)), entry.Produces, entry.Neutral, entry.Consumes))
 	}
 	if m.overview.EnergyNote != "" {
 		lines = append(lines, m.styles.hint.Render("note: "+m.overview.EnergyNote))
@@ -63,7 +65,7 @@ func (m Model) viewProject() string {
 	} else {
 		for _, evt := range m.overview.RecentEvents {
 			title := m.overview.TaskTitleByID[evt.TaskID]
-			lines = append(lines, fmt.Sprintf("- %s  %s  %s", evt.Timestamp.Format(time.RFC3339), title, formatEvent(evt)))
+			lines = append(lines, fmt.Sprintf("- %s  %s  %s", evt.Timestamp.Format(time.RFC3339), title, service.FormatEvent(evt)))
 		}
 	}
 	lines = append(lines, "", m.styles.hint.Render("Esc back"))
