@@ -66,11 +66,13 @@ type EnergyType string
 
 const (
 	EnergyProduces EnergyType = "produces"
+	EnergyNeutral  EnergyType = "neutral"
 	EnergyConsumes EnergyType = "consumes"
 )
 
 var EnergyTypeValues = []EnergyType{
 	EnergyProduces,
+	EnergyNeutral,
 	EnergyConsumes,
 }
 

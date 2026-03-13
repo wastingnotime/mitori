@@ -4,6 +4,7 @@ import "github.com/wastingnotime/mitori/internal/domain"
 
 type EnergySummary struct {
 	Produces int
+	Neutral  int
 	Consumes int
 }
 
@@ -26,6 +27,7 @@ func BuildBoardEnergySummary(board map[domain.Lane][]domain.Task) BoardEnergySum
 		s := summarizeTasksEnergy(tasks)
 		byLane[lane] = s
 		total.Produces += s.Produces
+		total.Neutral += s.Neutral
 		total.Consumes += s.Consumes
 	}
 	return BoardEnergySummary{
@@ -44,6 +46,9 @@ func BuildProjectEnergySummary(tasks []domain.Task) ProjectEnergySummary {
 		case domain.EnergyProduces:
 			entry.Produces++
 			total.Produces++
+		case domain.EnergyNeutral:
+			entry.Neutral++
+			total.Neutral++
 		case domain.EnergyConsumes:
 			entry.Consumes++
 			total.Consumes++
@@ -63,6 +68,8 @@ func summarizeTasksEnergy(tasks []domain.Task) EnergySummary {
 		switch task.EnergyType {
 		case domain.EnergyProduces:
 			s.Produces++
+		case domain.EnergyNeutral:
+			s.Neutral++
 		case domain.EnergyConsumes:
 			s.Consumes++
 		}
@@ -81,6 +88,7 @@ func energyNote(byLane map[domain.Lane]EnergySummary) string {
 	for _, lane := range activeLanes {
 		entry := byLane[lane]
 		active.Produces += entry.Produces
+		active.Neutral += entry.Neutral
 		active.Consumes += entry.Consumes
 	}
 	if active.Consumes > active.Produces {

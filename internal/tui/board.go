@@ -49,16 +49,16 @@ func (m Model) viewBoard() string {
 	}
 
 	status := m.styles.status.Render(m.status)
-	energyTotal := m.styles.hint.Render(fmt.Sprintf("energy total  produces:%d  consumes:%d", m.boardEnergy.Total.Produces, m.boardEnergy.Total.Consumes))
+	energyTotal := m.styles.hint.Render(fmt.Sprintf("energy total  produces:%d  neutral:%d  consumes:%d", m.boardEnergy.Total.Produces, m.boardEnergy.Total.Neutral, m.boardEnergy.Total.Consumes))
 	energyByLaneParts := make([]string, 0, 5)
 	for _, lane := range []domain.Lane{domain.LaneTodo, domain.LaneDoing, domain.LaneParking, domain.LaneHalt, domain.LaneDone} {
 		entry := m.boardEnergy.ByLane[lane]
-		energyByLaneParts = append(energyByLaneParts, fmt.Sprintf("%s P%d/C%d", strings.ToLower(domain.LaneTitle(lane)), entry.Produces, entry.Consumes))
+		energyByLaneParts = append(energyByLaneParts, fmt.Sprintf("%s P%d/N%d/C%d", strings.ToLower(domain.LaneTitle(lane)), entry.Produces, entry.Neutral, entry.Consumes))
 	}
 	energyByLane := m.styles.hint.Render("energy by lane  " + strings.Join(energyByLaneParts, "  "))
 	selectedLane := domain.LaneOrder[m.laneIdx]
 	laneEnergy := m.boardEnergy.ByLane[selectedLane]
-	laneEnergyLine := m.styles.hint.Render(fmt.Sprintf("selected lane %s  produces:%d  consumes:%d", strings.ToLower(domain.LaneTitle(selectedLane)), laneEnergy.Produces, laneEnergy.Consumes))
+	laneEnergyLine := m.styles.hint.Render(fmt.Sprintf("selected lane %s  produces:%d  neutral:%d  consumes:%d", strings.ToLower(domain.LaneTitle(selectedLane)), laneEnergy.Produces, laneEnergy.Neutral, laneEnergy.Consumes))
 	taskEnergyLine := ""
 	if task, ok := m.currentTask(); ok {
 		taskEnergyLine = m.styles.hint.Render(fmt.Sprintf("selected task energy:%s  nature:%s", task.EnergyType, task.Nature))

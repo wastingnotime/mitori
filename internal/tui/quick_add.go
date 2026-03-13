@@ -19,13 +19,16 @@ func (m Model) viewQuickAdd() string {
 	if m.quickErr != "" {
 		lines = append(lines, m.styles.error.Render(m.quickErr))
 	}
-	lines = append(lines, "", m.styles.hint.Render("enter create  esc cancel"))
+	lines = append(lines, "", m.styles.hint.Render("up/down history  ctrl+n autocomplete  enter create  esc cancel"))
 	return m.styles.app.Render(strings.Join(lines, "\n"))
 }
 
 func (m *Model) resetQuickAdd() {
 	m.quickErr = ""
 	m.quickInput.SetValue("")
+	m.quickHistory.browsing = false
+	m.quickHistory.idx = len(m.quickHistory.items)
+	m.quickHistory.draft = ""
 }
 
 func (m *Model) setQuickError(err error) {

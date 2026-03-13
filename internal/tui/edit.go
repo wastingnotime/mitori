@@ -24,7 +24,7 @@ func (m Model) viewEdit() string {
 		m.styles.sectionTitle.Render("edit value"),
 		m.editInput.View(),
 		"",
-		m.styles.hint.Render("tab/shift+tab field  enter save  esc cancel (double Esc if unsaved)"),
+		m.styles.hint.Render("tab/shift+tab field  ctrl+n autocomplete  enter save  esc cancel (double Esc if unsaved)"),
 	}
 	return m.styles.app.Render(strings.Join(lines, "\n"))
 }

@@ -10,6 +10,7 @@ func TestBuildBoardEnergySummary_Counts(t *testing.T) {
 	board := map[domain.Lane][]domain.Task{
 		domain.LaneTodo: {
 			{EnergyType: domain.EnergyProduces},
+			{EnergyType: domain.EnergyNeutral},
 			{EnergyType: domain.EnergyConsumes},
 		},
 		domain.LaneDoing: {
@@ -28,10 +29,10 @@ func TestBuildBoardEnergySummary_Counts(t *testing.T) {
 	}
 
 	got := BuildBoardEnergySummary(board)
-	if got.Total.Produces != 3 || got.Total.Consumes != 4 {
+	if got.Total.Produces != 3 || got.Total.Neutral != 1 || got.Total.Consumes != 4 {
 		t.Fatalf("unexpected total energy summary: %+v", got.Total)
 	}
-	if got.ByLane[domain.LaneDoing].Produces != 1 || got.ByLane[domain.LaneDoing].Consumes != 0 {
+	if got.ByLane[domain.LaneDoing].Produces != 1 || got.ByLane[domain.LaneDoing].Neutral != 0 || got.ByLane[domain.LaneDoing].Consumes != 0 {
 		t.Fatalf("unexpected doing lane summary: %+v", got.ByLane[domain.LaneDoing])
 	}
 	if got.Note == "" {
@@ -41,6 +42,7 @@ func TestBuildBoardEnergySummary_Counts(t *testing.T) {
 
 func TestBuildProjectEnergySummary_CountsByLane(t *testing.T) {
 	tasks := []domain.Task{
+		{Lane: domain.LaneTodo, EnergyType: domain.EnergyNeutral},
 		{Lane: domain.LaneTodo, EnergyType: domain.EnergyConsumes},
 		{Lane: domain.LaneDoing, EnergyType: domain.EnergyProduces},
 		{Lane: domain.LaneDoing, EnergyType: domain.EnergyProduces},
@@ -48,7 +50,7 @@ func TestBuildProjectEnergySummary_CountsByLane(t *testing.T) {
 	}
 
 	got := BuildProjectEnergySummary(tasks)
-	if got.Total.Produces != 2 || got.Total.Consumes != 2 {
+	if got.Total.Produces != 2 || got.Total.Neutral != 1 || got.Total.Consumes != 2 {
 		t.Fatalf("unexpected project total: %+v", got.Total)
 	}
 	doing := got.ByLane[domain.LaneDoing]
@@ -68,7 +70,7 @@ func TestBuildBoardEnergySummary_FilteredSubset(t *testing.T) {
 	}
 
 	got := BuildBoardEnergySummary(filteredBoard)
-	if got.Total.Produces != 2 || got.Total.Consumes != 0 {
+	if got.Total.Produces != 2 || got.Total.Neutral != 0 || got.Total.Consumes != 0 {
 		t.Fatalf("unexpected filtered summary: %+v", got.Total)
 	}
 	if got.Note != "" {

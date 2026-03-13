@@ -42,6 +42,7 @@ type Model struct {
 	constellationIdx int
 
 	quickInput    textinput.Model
+	quickHistory  quickAddHistory
 	searchInput   textinput.Model
 	editInput     textinput.Model
 	editingTaskID string
@@ -51,7 +52,6 @@ type Model struct {
 	editExitArmed bool
 	pendingTaskID string
 	pendingAction *domain.TaskAction
-	pendingQuit   bool
 	helpScroll    int
 }
 
@@ -103,26 +103,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case tea.KeyMsg:
-		if m.pendingQuit {
-			switch msg.String() {
-			case "q":
-				return m, tea.Quit
-			case "esc":
-				m.pendingQuit = false
-				m.status = "Quit canceled"
-				return m, nil
-			default:
-				m.pendingQuit = false
-			}
-		}
-		if msg.String() == "q" {
-			if m.hasUnsavedInput() {
-				m.pendingQuit = true
-				m.status = "Unsaved input will be lost. Press q to quit, Esc to cancel."
-				return m, nil
-			}
-			return m, tea.Quit
-		}
 		switch m.screen {
 		case screenQuickAdd:
 			return m.updateQuickAdd(msg)
@@ -190,6 +170,8 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "ctrl+c":
+		return m, tea.Quit
+	case "q":
 		return m, tea.Quit
 	case KeyLeft:
 		m.laneIdx = max(0, m.laneIdx-1)
@@ -304,6 +286,24 @@ func (m Model) updateQuickAdd(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.screen = screenBoard
 		return m, nil
+	case "up":
+		m.quickInput.SetValue(m.quickHistory.Prev(m.quickInput.Value()))
+		m.quickInput.CursorEnd()
+		return m, nil
+	case "down":
+		m.quickInput.SetValue(m.quickHistory.Next(m.quickInput.Value()))
+		m.quickInput.CursorEnd()
+		return m, nil
+	case "ctrl+n":
+		updated, ok := m.autocompleteQuickAdd()
+		if ok {
+			m.quickInput.SetValue(updated)
+			m.quickInput.CursorEnd()
+			m.quickErr = ""
+		} else {
+			m.status = "No autocomplete suggestion"
+		}
+		return m, nil
 	case "enter":
 		raw := m.quickInput.Value()
 		parsed := parser.ParseTaskInput(raw)
@@ -322,6 +322,7 @@ func (m Model) updateQuickAdd(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setQuickError(err)
 			return m, nil
 		}
+		m.quickHistory.Add(raw)
 		m.screen = screenBoard
 		m.status = "Task added: " + task.Title
 		if err := m.reload(); err != nil {
@@ -376,6 +377,17 @@ func (m Model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editFieldIdx = min(len(editFieldKeys())-1, m.editFieldIdx+1)
 		m.editInput.SetValue(m.currentEditFieldValue())
 		m.editInput.CursorEnd()
+		return m, nil
+	case "ctrl+n":
+		m.applyEditFieldValue(m.editFieldKey(), m.editInput.Value())
+		value, ok := m.autocompleteEditField()
+		if ok {
+			m.applyEditFieldValue(m.editFieldKey(), value)
+			m.editInput.SetValue(value)
+			m.editInput.CursorEnd()
+		} else {
+			m.status = "No autocomplete suggestion"
+		}
 		return m, nil
 	case "enter":
 		if m.editingTaskID == "" {

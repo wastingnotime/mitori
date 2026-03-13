@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wastingnotime/mitori/internal/domain"
+	"github.com/wastingnotime/mitori/internal/service"
 )
 
 func (m Model) viewTaskDetail() string {
@@ -21,7 +21,7 @@ func (m Model) viewTaskDetail() string {
 
 	var events []string
 	for _, evt := range m.recentEvents {
-		events = append(events, fmt.Sprintf("- %s  %s", evt.Timestamp.Format(time.RFC3339), formatEvent(evt)))
+		events = append(events, fmt.Sprintf("- %s  %s", evt.Timestamp.Format(time.RFC3339), service.FormatEvent(evt)))
 	}
 	if len(events) == 0 {
 		events = append(events, "- no events")
@@ -50,29 +50,6 @@ func (m Model) viewTaskDetail() string {
 		m.styles.hint.Render(m.actionHint() + "  t:touch  y:confirm  Esc:back  q:quit"),
 	}
 	return m.styles.app.Render(strings.Join(lines, "\n"))
-}
-
-func formatEvent(evt domain.Event) string {
-	switch evt.Type {
-	case domain.EventLaneChanged:
-		return fmt.Sprintf("lane_changed (%v -> %v)", evt.Payload["from"], evt.Payload["to"])
-	case domain.EventTaskParked:
-		return fmt.Sprintf("task_parked (from %v)", evt.Payload["from"])
-	case domain.EventTaskUnparked:
-		return fmt.Sprintf("task_unparked (to %v)", evt.Payload["to"])
-	case domain.EventTaskArchived:
-		if from, ok := evt.Payload["from_lane"]; ok {
-			return fmt.Sprintf("task_archived (from %v)", from)
-		}
-		return "task_archived"
-	case domain.EventTaskUpdated:
-		if action, ok := evt.Payload["action"]; ok {
-			return fmt.Sprintf("task_updated (%v)", action)
-		}
-		return "task_updated"
-	default:
-		return string(evt.Type)
-	}
 }
 
 func formatTimePtr(t *time.Time) string {
